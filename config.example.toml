@@ -1,0 +1,42 @@
+[app]
+name = "cogito-agent"
+workspace = "./workspace"
+debug = false
+
+[llm]
+provider = "openai_compatible"
+
+[llm.main]
+model = "deepseek-chat"
+api_key = "${LLM_API_KEY}"
+base_url = "${LLM_BASE_URL}"
+temperature = 0.2
+max_tokens = 2048
+
+[agent]
+max_iterations = 8
+memory_window = 40
+
+[tools]
+enable_filesystem = true
+require_approval_for_write = false
+
+[memory]
+enabled = true
+top_k = 5
+
+[proactive]
+enabled = false
+threshold = 0.6
+daily_limit = 5
+
+[drift]
+enabled = false
+max_steps = 30
+
+[tracing]
+enabled = true
+store = "jsonl"
+redact_sensitive = true
+save_prompt_hash = true
+save_prompt_preview = true
