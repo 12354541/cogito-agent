@@ -4,7 +4,7 @@ import asyncio
 
 from cogito_agent.agent.core import AgentCore
 from cogito_agent.agent.reasoner import RuleBasedReasoner
-from cogito_agent.agent.session import SessionManager
+from cogito_agent.agent.session import JSONLSessionStore, SessionManager
 from cogito_agent.agent.state import InboundMessage, Message
 from cogito_agent.agent.subagent import SubAgentRunner, SubAgentTask
 from cogito_agent.tracing.tracer import Tracer
@@ -44,6 +44,22 @@ def test_session_reset():
 
     manager.reset("default")
     assert manager.history("default") == []
+
+
+def test_session_manager_persists_jsonl(tmp_path):
+    store = JSONLSessionStore(tmp_path)
+    manager = SessionManager(store=store)
+    inbound = InboundMessage.from_cli("hello")
+    message = Message.user(inbound, trace_id="trace_test")
+
+    manager.append(message)
+    reloaded = SessionManager(store=store)
+
+    history = reloaded.history("default")
+    assert len(history) == 1
+    assert history[0].message_id == message.message_id
+    assert history[0].trace_id == "trace_test"
+    assert reloaded.state_deltas("default")[-1]["type"] == "message_appended"
 
 
 def test_subagent_runner_links_child_trace(tmp_path):

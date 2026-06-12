@@ -5,7 +5,7 @@ from pathlib import Path
 
 from cogito_agent.agent.core import AgentCore
 from cogito_agent.agent.reasoner import LLMReasoner, RuleBasedReasoner
-from cogito_agent.agent.session import SessionManager
+from cogito_agent.agent.session import JSONLSessionStore, SessionManager
 from cogito_agent.agent.state import InboundMessage
 from cogito_agent.agent.subagent import SubAgentRunner
 from cogito_agent.cli.commands import HELP_TEXT, CommandResult
@@ -59,7 +59,7 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
     workspace = config.workspace
     workspace.mkdir(parents=True, exist_ok=True)
 
-    session_manager = SessionManager(max_messages=config.agent.memory_window)
+    session_manager = SessionManager(max_messages=config.agent.memory_window, store=JSONLSessionStore(workspace))
     tracer = Tracer(
         workspace=workspace,
         store=config.tracing.store,
@@ -122,7 +122,7 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
     tool_registry.register(TimeTool())
     if config.tools.enable_filesystem:
         tool_registry.register(FileReadTool(workspace))
-        tool_registry.register(FileWriteTool(workspace))
+        tool_registry.register(FileWriteTool(workspace, require_approval_for_write=config.tools.require_approval_for_write))
     if config.tools.enable_web:
         tool_registry.register(WebFetchTool())
     tool_registry.register(MemoryWriteTool(memory_store))

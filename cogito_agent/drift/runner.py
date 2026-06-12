@@ -54,7 +54,7 @@ class DriftRunner:
             return self._finish(trace, self._audit_dirty_memories(skill))
         if skill.name == "self-diagnosis":
             return self._finish(trace, self._self_diagnosis(skill))
-        return self._finish(trace, DriftRunResult(skill_name=skill.name, status="skipped", details={"reason": "unsupported_skill"}))
+        return self._finish(trace, self._run_generic_skill(skill))
 
     def _audit_dirty_memories(self, skill: DriftSkill) -> DriftRunResult:
         memory_dir = self.workspace / "memory"
@@ -87,6 +87,29 @@ class DriftRunner:
             status="ok",
             message_result="silent",
             details={"report_path": str(report_path)},
+        )
+
+    def _run_generic_skill(self, skill: DriftSkill) -> DriftRunResult:
+        state_path = skill.path / "state.json"
+        queue_path = skill.path / "queue.md"
+        run_log_path = skill.path / "runs.md"
+        state = json.loads(state_path.read_text(encoding="utf-8") or "{}") if state_path.exists() else {}
+        queue_text = queue_path.read_text(encoding="utf-8", errors="ignore") if queue_path.exists() else ""
+        run_note = (
+            f"- run_at: {utc_now_iso()} | skill: {skill.name} | max_steps: {self.max_steps} | "
+            f"queue_chars: {len(queue_text)} | body_chars: {len(skill.body)} | finish_drift: true\n"
+        )
+        with run_log_path.open("a", encoding="utf-8") as f:
+            f.write(run_note)
+        state["last_run_at"] = utc_now_iso()
+        state["last_status"] = "ok"
+        state["last_queue_chars"] = len(queue_text)
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        return DriftRunResult(
+            skill_name=skill.name,
+            status="ok",
+            message_result="silent",
+            details={"run_log_path": str(run_log_path), "state_path": str(state_path), "generic": True},
         )
 
     def status(self) -> dict[str, object]:

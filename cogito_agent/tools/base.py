@@ -21,6 +21,7 @@ class Tool(ABC):
     parameters: dict[str, Any]
     risk_level: RiskLevel = "read-only"
     enabled: bool = True
+    timeout_seconds: float = 30.0
 
     def to_openai_tool(self) -> dict[str, Any]:
         return {

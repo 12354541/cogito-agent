@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from cogito_agent.tools.base import Tool, ToolResult
 from cogito_agent.tools.calculator import CalculatorTool
 from cogito_agent.tools.filesystem import FileReadTool, FileWriteTool
 from cogito_agent.tools.registry import ToolRegistry
@@ -38,6 +39,41 @@ def test_filesystem_tool_reads_workspace_file(tmp_path):
     assert written.success is True
     assert read.success is True
     assert read.content == "hello"
+
+
+def test_filesystem_tool_requires_overwrite_for_existing_file(tmp_path):
+    registry = ToolRegistry()
+    registry.register(FileWriteTool(tmp_path))
+
+    first = asyncio.run(registry.execute("write_file", {"path": "notes/todo.md", "content": "hello"}))
+    second = asyncio.run(registry.execute("write_file", {"path": "notes/todo.md", "content": "replace"}))
+    third = asyncio.run(registry.execute("write_file", {"path": "notes/todo.md", "content": "replace", "overwrite": True}))
+
+    assert first.success is True
+    assert second.success is False
+    assert "overwrite=true" in (second.error or "")
+    assert third.success is True
+
+
+class SlowTool(Tool):
+    name = "slow"
+    description = "Slow test tool"
+    parameters = {"type": "object", "properties": {}, "additionalProperties": False}
+    timeout_seconds = 0.01
+
+    async def execute(self, **kwargs):
+        await asyncio.sleep(0.1)
+        return ToolResult(content="done", success=True)
+
+
+def test_tool_registry_times_out_tools():
+    registry = ToolRegistry()
+    registry.register(SlowTool())
+
+    result = asyncio.run(registry.execute("slow", {}))
+
+    assert result.success is False
+    assert "timed out" in (result.error or "")
 
 
 def test_tool_search_finds_registered_tools():

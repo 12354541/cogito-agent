@@ -17,14 +17,15 @@ Cogito-Agent 是一个面向个人使用场景的本地 AI Agent Runtime。它�
 ## 主要能力
 
 - CLI 对话入口：支持 `/history`、`/tools`、`/memory`、`/forget`、`/trace last`
+- SessionManager：支持 JSONL 持久化、消息元数据、trace_id、channel、state delta，重启后可恢复历史
 - OpenAI-compatible LLM Provider：可接 DeepSeek、硅基流动等兼容接口
 - 多模型角色配置：主模型、快速模型、推理模型、总结模型、评估模型、Embedding、视觉、多模态、Reranker
 - PromptManager：系统提示词、会话历史、记忆和文档检索注入
 - ToolRegistry：工具注册、schema 导出、参数校验、风险等级、安全拦截、trace 记录
 - 内置工具：计算器、时间、工作区文件读写、记忆写入/回忆、工具搜索、可选网页抓取、计划任务创建
 - Reasoner Tool Loop：支持 LLM 多步工具调用和工具结果回填
-- Markdown Memory：长期记忆、pending 记忆、记忆优化和删除
-- RAG：支持本地 `workspace/docs` 文档检索
+- Markdown Memory：长期记忆、pending 记忆、HISTORY、RECENT_CONTEXT、journal 审计、confidence、source_ref、记忆优化和删除
+- RAG：支持本地 `workspace/docs` 文档检索、chunk hash、磁盘向量索引和增量去重
 - Embedding RAG：启用 embedding 配置后可使用真实 embedding 模型
 - Reranker：启用 reranker 配置后可对 RAG 结果重排
 - Plugin System：生命周期 phase、工具调用前拦截、工具结果后处理
@@ -32,12 +33,12 @@ Cogito-Agent 是一个面向个人使用场景的本地 AI Agent Runtime。它�
 - OpenTelemetry：可选 console / OTLP span export hook
 - Scheduler：本地计划任务、due 检测、触发标记、取消和更新
 - Proactive：主动 tick、评分、quota、cooldown、quiet hours、outbox、trace
-- Drift：`SKILL.md` 后台技能、内置记忆审计和自诊断、最小间隔、state、trace
+- Drift：`SKILL.md` 后台技能、内置记忆审计和自诊断、通用文件型 skill run、最小间隔、state、trace
 - SubAgent：子任务执行和 parent/child trace 关联
 - API Server：FastAPI 对外接口
 - Dashboard：系统健康、Trace Timeline、工具统计、记忆、计划任务、Prompt、Drift、Proactive 配置管理
 - Webhook 集成：通用入站 webhook 和 Telegram webhook 形态入口
-- 安全默认值：本地密钥不入库，工作区文件沙箱，web 工具默认关闭
+- 安全默认值：本地密钥不入库，工作区文件沙箱，写文件默认不覆盖，工具级 timeout，web 工具默认关闭
 
 ## 目录结构
 
@@ -68,6 +69,7 @@ cogito-agent/
 
 ```text
 workspace/
+  sessions/
   memory/
   docs/
   traces/
@@ -77,6 +79,7 @@ workspace/
   proactive_sources.json
   proactive_quota.json
   proactive_outbox.jsonl
+  vector_index.json
 ```
 
 ## 安装
@@ -208,6 +211,8 @@ require_approval_for_write = false
 ```
 
 `web_fetch` 默认关闭。Shell 工具目前默认不开放，避免高风险自动执行。
+
+写文件工具默认不会覆盖已有文件；需要明确传入 `overwrite = true` 才能替换已有文件。如果 `require_approval_for_write = true`，写入也会要求显式覆盖确认。
 
 ### Proactive
 
@@ -428,6 +433,9 @@ workspace/memory/MEMORY.md
 ```text
 workspace/memory/PENDING.md
 workspace/memory/RECENT_CONTEXT.md
+workspace/memory/HISTORY.md
+workspace/memory/journal/YYYY-MM-DD.jsonl
+workspace/memory/memory_audit.jsonl
 ```
 
 本地知识库文档放在：
@@ -436,7 +444,7 @@ workspace/memory/RECENT_CONTEXT.md
 workspace/docs/
 ```
 
-支持 `.md` 和 `.txt` 文档。启用 `llm.embedding` 后，RAG 会使用 embedding-backed 检索；启用 `llm.reranker` 后，会对候选文档进行重排。
+支持 `.md` 和 `.txt` 文档。启用 `llm.embedding` 后，RAG 会使用 embedding-backed 检索；启用 `llm.reranker` 后，会对候选文档进行重排。文档索引会持久化到 `workspace/vector_index.json`，通过 chunk 内容 hash 避免重复 ingest。
 
 ## Scheduler / Proactive / Drift
 
@@ -483,7 +491,7 @@ workspace/drift/skills/<skill-name>/SKILL.md
 - `audit-dirty-memories`
 - `self-diagnosis`
 
-每次 Drift run 会写入 state 和 trace，并在结果中包含 `finish_drift` 标记。
+每次 Drift run 会写入 state 和 trace，并在结果中包含 `finish_drift` 标记。除内置 skill 外，自定义 `SKILL.md` 会走通用文件型后台任务 runner，写入 `runs.md` 和 `state.json`。
 
 ## Trace 和可观测
 

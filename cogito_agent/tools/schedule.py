@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cogito_agent.agent.state import new_id, utc_now_iso
 from cogito_agent.tools.base import Tool, ToolResult
@@ -130,6 +131,8 @@ class ScheduleCreateTool(Tool):
 def _is_due(item: ScheduleItem, now: datetime) -> bool:
     if not item.enabled:
         return False
+    tz = _zoneinfo(item.timezone)
+    local_now = now.astimezone(tz)
     last_triggered_at = _parse_dt(item.metadata.get("last_triggered_at"))
     if item.trigger == "once":
         run_at = _parse_dt(item.metadata.get("run_at") or item.cron_expr)
@@ -144,7 +147,7 @@ def _is_due(item: ScheduleItem, now: datetime) -> bool:
             return True
         return (now - last_triggered_at).total_seconds() >= interval_seconds
     if item.trigger == "cron":
-        return _cron_due(item, now, last_triggered_at)
+        return _cron_due(item, local_now, last_triggered_at.astimezone(tz) if last_triggered_at else None)
     return False
 
 
@@ -188,3 +191,10 @@ def _cron_due(item: ScheduleItem, now: datetime, last_triggered_at: datetime | N
             return False
         return not last_triggered_at or last_triggered_at.date() < now.date()
     return False
+
+
+def _zoneinfo(timezone_name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(timezone_name or "UTC")
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")

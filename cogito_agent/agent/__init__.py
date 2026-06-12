@@ -9,6 +9,7 @@ __all__ = [
     "Message",
     "RuleBasedReasoner",
     "LLMReasoner",
+    "JSONLSessionStore",
     "SessionManager",
     "SubAgentRunner",
     "SubAgentTask",
@@ -24,10 +25,10 @@ def __getattr__(name: str) -> Any:
         from cogito_agent.agent.reasoner import LLMReasoner, RuleBasedReasoner
 
         return {"RuleBasedReasoner": RuleBasedReasoner, "LLMReasoner": LLMReasoner}[name]
-    if name == "SessionManager":
-        from cogito_agent.agent.session import SessionManager
+    if name in {"JSONLSessionStore", "SessionManager"}:
+        from cogito_agent.agent.session import JSONLSessionStore, SessionManager
 
-        return SessionManager
+        return {"JSONLSessionStore": JSONLSessionStore, "SessionManager": SessionManager}[name]
     if name in {"SubAgentRunner", "SubAgentTask"}:
         from cogito_agent.agent.subagent import SubAgentRunner, SubAgentTask
 

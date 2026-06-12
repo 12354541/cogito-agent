@@ -19,6 +19,19 @@ def test_chat_api_returns_trace_id(tmp_path):
     assert data["trace_id"].startswith("trace_")
 
 
+def test_session_api_includes_state_deltas(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    client.post("/chat", json={"message": "hello", "session_id": "stateful"})
+    response = client.get("/sessions/stateful")
+
+    assert response.status_code == 200
+    assert response.json()["messages"]
+    assert response.json()["state_deltas"]
+
+
 def test_webhook_inbound_endpoint(tmp_path):
     config = AppConfig(workspace=tmp_path)
     app = create_app(config)

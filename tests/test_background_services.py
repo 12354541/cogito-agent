@@ -40,6 +40,25 @@ def test_schedule_store_due_and_mark_triggered(tmp_path):
     assert store.due(now) == []
 
 
+def test_schedule_store_cron_uses_timezone(tmp_path):
+    store = ScheduleStore(tmp_path)
+    now = datetime(2026, 1, 1, 2, 30, tzinfo=timezone.utc)
+    store.add(
+        ScheduleItem(
+            schedule_id="schedule_tz",
+            name="daily",
+            trigger="cron",
+            prompt="ping",
+            cron_expr="10:00",
+            timezone="Asia/Shanghai",
+        )
+    )
+
+    due = store.due(now)
+
+    assert due[0].schedule_id == "schedule_tz"
+
+
 def test_proactive_tick_selects_alert(tmp_path):
     (tmp_path / "proactive_sources.json").write_text(
         '[{"item_id":"a1","channel":"alert","title":"Important","body":"Check now","priority":5}]',
@@ -103,3 +122,22 @@ def test_drift_runner_enforces_interval_and_force(tmp_path):
     assert second.details["finish_drift"] is True
     assert forced.status == "ok"
     assert forced.details["finish_drift"] is True
+
+
+def test_drift_runner_executes_generic_skill(tmp_path):
+    runner = DriftRunner(tmp_path)
+    runner.loader.upsert_skill(name="custom", description="Custom skill", body="## Goal\nDo a generic task")
+
+    result = runner.run_once(force=True)
+
+    # Built-ins sort first on some file systems, so run custom directly by
+    # removing built-in interval pressure through a second forced run if needed.
+    if result.skill_name != "custom":
+        (tmp_path / "drift" / "skills" / "audit-dirty-memories" / "SKILL.md").unlink()
+        (tmp_path / "drift" / "skills" / "self-diagnosis" / "SKILL.md").unlink()
+        result = runner.run_once(force=True)
+
+    assert result.status == "ok"
+    assert result.skill_name == "custom"
+    assert result.details["generic"] is True
+    assert (tmp_path / "drift" / "skills" / "custom" / "runs.md").exists()

@@ -268,7 +268,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
     @app.get("/sessions/{session_id}")
     async def get_session(session_id: str) -> dict[str, Any]:
-        return {"session_id": session_id, "messages": [asdict(message) for message in runtime.session_manager.history(session_id)]}
+        return {
+            "session_id": session_id,
+            "messages": [asdict(message) for message in runtime.session_manager.history(session_id)],
+            "state_deltas": runtime.session_manager.state_deltas(session_id),
+        }
 
     @app.post("/sessions/{session_id}/reset")
     async def reset_session(session_id: str) -> dict[str, Any]:

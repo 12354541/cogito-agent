@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -75,7 +76,9 @@ class ToolRegistry:
             )
             tracer.record_event(trace, event="tool_call_started", metadata={"tool_name": name})
         try:
-            result = await tool.execute(**arguments)
+            result = await asyncio.wait_for(tool.execute(**arguments), timeout=tool.timeout_seconds)
+        except asyncio.TimeoutError:
+            result = ToolResult(content="", success=False, error=f"Tool timed out after {tool.timeout_seconds} seconds.")
         except Exception as exc:
             result = ToolResult(content="", success=False, error=str(exc))
 

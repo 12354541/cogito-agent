@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,18 +36,27 @@ class InMemoryVectorStore:
     cosine search, keeping local tests and no-key setups deterministic.
     """
 
-    def __init__(self, embedding_client: EmbeddingClient | None = None) -> None:
+    def __init__(self, embedding_client: EmbeddingClient | None = None, index_path: Path | None = None) -> None:
         self.embedding_client = embedding_client
+        self.index_path = index_path
         self._documents: dict[str, VectorDocument] = {}
+        if self.index_path and self.index_path.exists():
+            self._load_index()
 
     def upsert(self, document: VectorDocument) -> None:
         self._documents[document.doc_id] = document
+        self._save_index()
 
     def add_text(self, *, doc_id: str, source: str, content: str, metadata: dict[str, Any] | None = None) -> None:
+        content_hash = _hash_text(content)
+        existing = self._documents.get(doc_id)
+        if existing and existing.metadata.get("content_hash") == content_hash:
+            return
         embedding = None
         if self.embedding_client:
             embedding = self.embedding_client.embed_texts([content])[0]
-        self.upsert(VectorDocument(doc_id=doc_id, source=source, content=content, embedding=embedding, metadata=metadata or {}))
+        merged_metadata = {**(metadata or {}), "content_hash": content_hash}
+        self.upsert(VectorDocument(doc_id=doc_id, source=source, content=content, embedding=embedding, metadata=merged_metadata))
 
     def search(self, query: str, *, top_k: int = 5) -> list[VectorHit]:
         if self.embedding_client:
@@ -97,8 +108,10 @@ class InMemoryVectorStore:
         *,
         chunk_chars: int = 1200,
         embedding_client: EmbeddingClient | None = None,
+        persist: bool = True,
     ) -> "InMemoryVectorStore":
-        store = cls(embedding_client=embedding_client)
+        index_path = workspace / "vector_index.json" if persist else None
+        store = cls(embedding_client=embedding_client, index_path=index_path)
         docs_dir = workspace / "docs"
         if not docs_dir.exists():
             return store
@@ -115,9 +128,27 @@ class InMemoryVectorStore:
                 )
         return store
 
+    def _load_index(self) -> None:
+        if not self.index_path:
+            return
+        data = json.loads(self.index_path.read_text(encoding="utf-8") or "[]")
+        for item in data:
+            self._documents[item["doc_id"]] = VectorDocument(**item)
+
+    def _save_index(self) -> None:
+        if not self.index_path:
+            return
+        self.index_path.parent.mkdir(parents=True, exist_ok=True)
+        data = [asdict(document) for document in self._documents.values()]
+        self.index_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
 
 def _chunks(text: str, chunk_chars: int) -> list[str]:
     return [text[index : index + chunk_chars] for index in range(0, len(text), chunk_chars) if text[index : index + chunk_chars].strip()]
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _term_vector(text: str) -> dict[str, float]:
