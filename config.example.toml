@@ -6,12 +6,98 @@ debug = false
 [llm]
 provider = "openai_compatible"
 
+# Main reasoning and final-answer model. Runtime reads model credentials from
+# this file, with environment variables allowed to override values.
 [llm.main]
+enabled = true
 model = "deepseek-chat"
 api_key = "${LLM_API_KEY}"
-base_url = "${LLM_BASE_URL}"
+base_url = "https://api.deepseek.com"
 temperature = 0.2
 max_tokens = 2048
+enable_thinking = false
+multimodal = false
+
+# Cheap/low-latency model for lightweight classification, query rewrite,
+# memory gates, and small tool-routing decisions.
+[llm.fast]
+enabled = true
+model = "deepseek-chat"
+api_key = "${LLM_API_KEY}"
+base_url = "https://api.deepseek.com"
+temperature = 0.0
+max_tokens = 1024
+
+# Optional deep reasoning role for planning, difficult diagnosis, and
+# multi-step analysis.
+[llm.reasoning]
+enabled = false
+model = "deepseek-reasoner"
+api_key = "${LLM_API_KEY}"
+base_url = "https://api.deepseek.com"
+temperature = 0.2
+max_tokens = 4096
+enable_thinking = true
+
+# Summarization role for session compression, memory consolidation, and
+# long-document digests.
+[llm.summarizer]
+enabled = true
+model = "deepseek-chat"
+api_key = "${LLM_API_KEY}"
+base_url = "https://api.deepseek.com"
+temperature = 0.1
+max_tokens = 2048
+
+# Judge/evaluator role for proactive scoring, evals, and answer checks.
+[llm.judge]
+enabled = true
+model = "deepseek-chat"
+api_key = "${LLM_API_KEY}"
+base_url = "https://api.deepseek.com"
+temperature = 0.0
+max_tokens = 1024
+
+# Embedding model for future semantic memory/RAG. Fill these env vars when
+# an embedding-compatible provider is available.
+[llm.embedding]
+enabled = true
+model = "BAAI/bge-m3"
+api_key = "${EMBEDDING_API_KEY}"
+base_url = "https://api.siliconflow.cn/v1"
+temperature = 0.0
+max_tokens = 0
+
+# Multimodal general model for image+text tasks.
+[llm.multimodal]
+enabled = false
+model = "Qwen/Qwen3.6-27B"
+api_key = "${MULTIMODAL_LLM_API_KEY}"
+base_url = "https://api.siliconflow.cn/v1"
+temperature = 0.2
+max_tokens = 2048
+multimodal = true
+
+# Dedicated vision role for image understanding/OCR if separated from the
+# multimodal role.
+[llm.vision]
+enabled = true
+model = "Qwen/Qwen3.6-27B"
+api_key = "${VISION_LLM_API_KEY}"
+base_url = "https://api.siliconflow.cn/v1"
+temperature = 0.2
+max_tokens = 2048
+enable_thinking = false
+multimodal = true
+
+# Reranker role for future RAG result ordering.
+[llm.reranker]
+enabled = true
+model = "BAAI/bge-reranker-v2-m3"
+api_key = "${RERANKER_API_KEY}"
+base_url = "https://api.siliconflow.cn/v1"
+temperature = 0.0
+max_tokens = 512
 
 [agent]
 max_iterations = 8
@@ -19,11 +105,28 @@ memory_window = 40
 
 [tools]
 enable_filesystem = true
+enable_web = false
+enable_shell = false
 require_approval_for_write = false
 
 [memory]
 enabled = true
+backend = "markdown"
 top_k = 5
+consolidation_enabled = true
+optimizer_enabled = true
+
+[tracing]
+enabled = true
+store = "jsonl"
+redact_sensitive = true
+save_prompt_hash = true
+save_prompt_preview = true
+
+[api]
+enabled = false
+host = "127.0.0.1"
+port = 8000
 
 [proactive]
 enabled = false
@@ -33,10 +136,4 @@ daily_limit = 5
 [drift]
 enabled = false
 max_steps = 30
-
-[tracing]
-enabled = true
-store = "jsonl"
-redact_sensitive = true
-save_prompt_hash = true
-save_prompt_preview = true
+min_interval_hours = 1

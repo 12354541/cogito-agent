@@ -15,4 +15,5 @@ workspace/
 *.zip
 
 .env
+config.toml
 *.local.toml
