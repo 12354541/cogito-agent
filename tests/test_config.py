@@ -34,6 +34,8 @@ store = "sqlite"
 save_prompt_preview = false
 otel_enabled = true
 otel_service_name = "cogito-test"
+otel_exporter = "otlp"
+otel_endpoint = "http://localhost:4318/v1/traces"
 
 [tools]
 enable_web = true
@@ -64,6 +66,8 @@ min_interval_hours = 0.5
     assert config.tracing.save_prompt_preview is False
     assert config.tracing.otel_enabled is True
     assert config.tracing.otel_service_name == "cogito-test"
+    assert config.tracing.otel_exporter == "otlp"
+    assert config.tracing.otel_endpoint == "http://localhost:4318/v1/traces"
     assert config.tools.enable_web is True
     assert config.tools.enable_shell is False
     assert config.proactive.enabled is True

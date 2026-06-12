@@ -12,7 +12,7 @@ memory.
 - ToolRegistry with schema export, argument validation, risk checks, and trace
 - Built-in tools: calculator, current time, workspace file read/write, memory write/recall, tool search, optional web fetch, schedule create
 - JSONL trace store under `workspace/traces` or optional SQLite trace store, with structured trace list, step/tool/memory queries, and tool statistics
-- FastAPI app with `/chat`, `/dashboard`, `/dashboard/data`, `/health`, session reset/history, `/tools`, `/memory`, `/prompts/system`, `/traces`, `/traces/stats/tools`, `/traces/{trace_id}`, `/traces/{trace_id}/steps`, `/schedules`, `/schedules/due`, `/plugins`, `/proactive/status`, `/proactive/config`, `/proactive/outbox`, `/drift/skills`
+- FastAPI app with `/chat`, `/webhooks/inbound/{source}`, `/telegram/webhook`, `/integrations`, `/dashboard`, `/dashboard/data`, `/health`, session reset/history, `/tools`, `/memory`, `/prompts/system`, `/traces`, `/traces/stats/tools`, `/traces/{trace_id}`, `/traces/{trace_id}/steps`, `/schedules`, `/schedules/due`, `/plugins`, `/proactive/status`, `/proactive/config`, `/proactive/outbox`, `/drift/skills`
 - Plugin lifecycle and tool interception with built-in observe, shell safety, and loop guard plugins
 - Markdown memory consolidation plus lexical or embedding-backed RAG over `workspace/docs`, with optional reranking
 - SubAgent runner with parent/child trace linkage for scoped child tasks
@@ -20,7 +20,8 @@ memory.
 - Proactive tick loop with alert/content/context scoring, quota, cooldown, quiet hours, outbox delivery records, schedule triggering, and trace events
 - Drift runner with SKILL.md loading, built-in audit/self-diagnosis skills, min-interval state, finish markers, and trace events
 - Dashboard/API management for prompt versions, Drift skills, proactive config, system health, trace timeline, memory, schedules, and tool statistics
-- Optional OpenTelemetry span export hook, disabled by default and safe when OpenTelemetry packages are not installed
+- Optional OpenTelemetry console or OTLP span export hook, disabled by default and safe when OpenTelemetry packages are not installed
+- Productized inbound integration endpoints for generic webhooks and Telegram-style webhook payloads
 - Offline rule-based fallback when `LLM_API_KEY` is not configured
 
 ## Setup

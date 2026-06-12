@@ -65,6 +65,8 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
         store=config.tracing.store,
         otel_enabled=config.tracing.otel_enabled,
         otel_service_name=config.tracing.otel_service_name,
+        otel_exporter=config.tracing.otel_exporter,
+        otel_endpoint=config.tracing.otel_endpoint,
     )
     memory_store = MarkdownMemoryStore(workspace=workspace)
     embedding_role = config.llm.roles.get("embedding")

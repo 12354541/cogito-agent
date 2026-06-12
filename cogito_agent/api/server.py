@@ -21,6 +21,13 @@ class ChatRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class WebhookInboundRequest(BaseModel):
+    message: str
+    session_id: str = "webhook"
+    user_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ScheduleRequest(BaseModel):
     name: str
     prompt: str
@@ -87,6 +94,10 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             "proactive": runtime.proactive_loop.status(),
             "drift": runtime.drift_runner.status(),
             "prompt": asdict(runtime.prompt_store.get_current()),
+            "integrations": {
+                "webhook_inbound": "/webhooks/inbound/{source}",
+                "telegram_webhook": "/telegram/webhook",
+            },
         }
 
     @app.get("/dashboard", response_class=HTMLResponse)
@@ -152,6 +163,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
               <div class="metric"><div>Last trace</div><div>{trace_link}</div></div>
             </div>
             <section>
+              <h2>Integrations</h2>
+              <table><thead><tr><th>Channel</th><th>Endpoint</th></tr></thead><tbody>
+                <tr><td>Webhook inbound</td><td><code>POST /webhooks/inbound/&lt;source&gt;</code></td></tr>
+                <tr><td>Telegram webhook</td><td><code>POST /telegram/webhook</code></td></tr>
+              </tbody></table>
+            </section>
+            <section>
               <h2>Trace Timeline</h2>
               <table><thead><tr><th>ID</th><th>Session</th><th>Status</th><th>Duration</th><th>Input</th></tr></thead><tbody>{trace_rows}</tbody></table>
             </section>
@@ -196,6 +214,57 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         response = await runtime.agent.process(inbound)
         return asdict(response)
+
+    @app.post("/webhooks/inbound/{source}")
+    async def inbound_webhook(source: str, request: WebhookInboundRequest) -> dict[str, Any]:
+        inbound = InboundMessage(
+            message_id=new_id("webhook_msg"),
+            session_id=request.session_id,
+            channel=f"webhook:{source}",
+            user_id=request.user_id,
+            content=request.message,
+            metadata={"source": source, **request.metadata},
+        )
+        response = await runtime.agent.process(inbound)
+        return asdict(response)
+
+    @app.post("/telegram/webhook")
+    async def telegram_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+        message = payload.get("message") or payload.get("edited_message") or {}
+        chat = message.get("chat") or {}
+        text = str(message.get("text") or "")
+        if not text:
+            raise HTTPException(status_code=400, detail="Telegram payload does not contain message.text")
+        chat_id = str(chat.get("id") or "telegram")
+        inbound = InboundMessage(
+            message_id=new_id("telegram_msg"),
+            session_id=f"telegram:{chat_id}",
+            channel="telegram",
+            user_id=str(message.get("from", {}).get("id") or "") or None,
+            content=text,
+            metadata={"telegram_update_id": payload.get("update_id"), "chat_id": chat_id},
+        )
+        response = await runtime.agent.process(inbound)
+        return asdict(response)
+
+    @app.get("/integrations")
+    async def integrations() -> dict[str, Any]:
+        return {
+            "inbound": [
+                {
+                    "name": "webhook",
+                    "endpoint": "/webhooks/inbound/{source}",
+                    "method": "POST",
+                    "body": {"message": "string", "session_id": "optional", "user_id": "optional", "metadata": {}},
+                },
+                {
+                    "name": "telegram",
+                    "endpoint": "/telegram/webhook",
+                    "method": "POST",
+                    "body": "Telegram update payload with message.text",
+                },
+            ]
+        }
 
     @app.get("/sessions/{session_id}")
     async def get_session(session_id: str) -> dict[str, Any]:

@@ -8,6 +8,8 @@ from typing import Any
 class OpenTelemetryExporter:
     enabled: bool = False
     service_name: str = "cogito-agent"
+    exporter: str = "console"
+    endpoint: str = ""
     available: bool = field(default=False, init=False)
     _tracer: Any = field(default=None, init=False, repr=False)
 
@@ -24,7 +26,15 @@ class OpenTelemetryExporter:
         except Exception:
             return
         provider = TracerProvider(resource=Resource.create({"service.name": self.service_name}))
-        provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+        span_exporter = ConsoleSpanExporter()
+        if self.exporter.lower() == "otlp":
+            try:
+                from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+                span_exporter = OTLPSpanExporter(endpoint=self.endpoint or None)
+            except Exception:
+                span_exporter = ConsoleSpanExporter()
+        provider.add_span_processor(BatchSpanProcessor(span_exporter))
         otel_trace.set_tracer_provider(provider)
         self._tracer = otel_trace.get_tracer(self.service_name)
         self.available = True

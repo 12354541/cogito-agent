@@ -41,9 +41,16 @@ class Tracer:
         *,
         otel_enabled: bool = False,
         otel_service_name: str = "cogito-agent",
+        otel_exporter: str = "console",
+        otel_endpoint: str = "",
     ) -> None:
         self.store = _build_store(workspace=workspace, store=store)
-        self.otel = OpenTelemetryExporter(enabled=otel_enabled, service_name=otel_service_name)
+        self.otel = OpenTelemetryExporter(
+            enabled=otel_enabled,
+            service_name=otel_service_name,
+            exporter=otel_exporter,
+            endpoint=otel_endpoint,
+        )
         self.last_trace_id: str | None = None
         self._records: dict[str, TraceRecord] = {}
         self._spans: dict[str, list[TraceSpan]] = {}

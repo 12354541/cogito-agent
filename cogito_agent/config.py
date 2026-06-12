@@ -85,6 +85,8 @@ class TracingConfig:
     save_prompt_preview: bool = True
     otel_enabled: bool = False
     otel_service_name: str = "cogito-agent"
+    otel_exporter: str = "console"
+    otel_endpoint: str = ""
 
 
 @dataclass(slots=True)
@@ -236,6 +238,8 @@ def load_config(path: Path | str = "config.toml") -> AppConfig:
             save_prompt_preview=bool(tracing_data.get("save_prompt_preview", True)),
             otel_enabled=bool(tracing_data.get("otel_enabled", False)),
             otel_service_name=str(tracing_data.get("otel_service_name", "cogito-agent")),
+            otel_exporter=str(tracing_data.get("otel_exporter", "console")),
+            otel_endpoint=str(tracing_data.get("otel_endpoint", "")),
         ),
         proactive=ProactiveConfig(
             enabled=bool(proactive_data.get("enabled", False)),

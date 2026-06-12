@@ -19,6 +19,47 @@ def test_chat_api_returns_trace_id(tmp_path):
     assert data["trace_id"].startswith("trace_")
 
 
+def test_webhook_inbound_endpoint(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    response = client.post("/webhooks/inbound/github", json={"message": "ping", "session_id": "hook"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == "hook"
+    assert data["trace_id"].startswith("trace_")
+
+
+def test_telegram_webhook_endpoint(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    response = client.post(
+        "/telegram/webhook",
+        json={"update_id": 1, "message": {"text": "hello", "chat": {"id": 123}, "from": {"id": 456}}},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == "telegram:123"
+    assert data["trace_id"].startswith("trace_")
+
+
+def test_integrations_endpoint(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    response = client.get("/integrations")
+
+    assert response.status_code == 200
+    names = {item["name"] for item in response.json()["inbound"]}
+    assert {"webhook", "telegram"} <= names
+
+
 def test_api_background_endpoints(tmp_path):
     config = AppConfig(workspace=tmp_path)
     app = create_app(config)
