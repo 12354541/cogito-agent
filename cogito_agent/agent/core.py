@@ -33,7 +33,7 @@ class AgentCore:
         trace = self.tracer.start_trace(
             session_id=inbound.session_id,
             user_message_preview=inbound.content[:200],
-            metadata={"channel": inbound.channel, "message_id": inbound.message_id},
+            metadata={"channel": inbound.channel, "message_id": inbound.message_id, **inbound.metadata},
         )
 
         try:

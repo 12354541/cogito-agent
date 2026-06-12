@@ -7,10 +7,13 @@ from cogito_agent.agent.core import AgentCore
 from cogito_agent.agent.reasoner import LLMReasoner, RuleBasedReasoner
 from cogito_agent.agent.session import SessionManager
 from cogito_agent.agent.state import InboundMessage
+from cogito_agent.agent.subagent import SubAgentRunner
 from cogito_agent.cli.commands import HELP_TEXT, CommandResult
 from cogito_agent.config import AppConfig, load_config
 from cogito_agent.drift.runner import DriftRunner
+from cogito_agent.llm.embeddings import OpenAICompatibleEmbeddingClient
 from cogito_agent.llm.openai_compatible import OpenAICompatibleProvider
+from cogito_agent.llm.reranker import OpenAICompatibleRerankerClient
 from cogito_agent.memory.consolidation import MemoryConsolidator
 from cogito_agent.memory.markdown_store import MarkdownMemoryStore
 from cogito_agent.memory.optimizer import MemoryOptimizer
@@ -21,6 +24,7 @@ from cogito_agent.plugins.builtin.shell_safety import ShellSafetyPlugin
 from cogito_agent.plugins.builtin.tool_loop_guard import ToolLoopGuardPlugin
 from cogito_agent.plugins.manager import PluginManager
 from cogito_agent.proactive.loop import ProactiveLoop
+from cogito_agent.proactive.quota import ProactiveQuota
 from cogito_agent.prompting.manager import PromptManager
 from cogito_agent.tools.calculator import CalculatorTool
 from cogito_agent.tools.filesystem import FileReadTool, FileWriteTool
@@ -28,6 +32,8 @@ from cogito_agent.tools.memory_tools import MemoryRecallTool, MemoryWriteTool
 from cogito_agent.tools.registry import ToolRegistry
 from cogito_agent.tools.schedule import ScheduleCreateTool, ScheduleStore
 from cogito_agent.tools.time_tool import TimeTool
+from cogito_agent.tools.tool_search import ToolSearchTool
+from cogito_agent.tools.web import WebFetchTool
 from cogito_agent.tracing.tracer import Tracer
 
 
@@ -43,6 +49,7 @@ class RuntimeServices:
     proactive_loop: ProactiveLoop
     drift_runner: DriftRunner
     plugin_manager: PluginManager
+    subagent_runner: SubAgentRunner
 
 
 def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
@@ -51,15 +58,53 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
     workspace.mkdir(parents=True, exist_ok=True)
 
     session_manager = SessionManager(max_messages=config.agent.memory_window)
-    tracer = Tracer(workspace=workspace)
+    tracer = Tracer(workspace=workspace, store=config.tracing.store)
     memory_store = MarkdownMemoryStore(workspace=workspace)
-    vector_store = InMemoryVectorStore.from_workspace_docs(workspace)
-    memory_retriever = MemoryRetriever(memory_store, vector_store=vector_store, top_k=config.memory.top_k)
+    embedding_role = config.llm.roles.get("embedding")
+    embedding_client = (
+        OpenAICompatibleEmbeddingClient(
+            api_key=embedding_role.api_key,
+            base_url=embedding_role.base_url,
+            model=embedding_role.model,
+        )
+        if embedding_role and embedding_role.enabled and embedding_role.api_key and embedding_role.base_url and embedding_role.model
+        else None
+    )
+    reranker_role = config.llm.roles.get("reranker")
+    reranker = (
+        OpenAICompatibleRerankerClient(
+            api_key=reranker_role.api_key,
+            base_url=reranker_role.base_url,
+            model=reranker_role.model,
+        )
+        if reranker_role and reranker_role.enabled and reranker_role.api_key and reranker_role.base_url and reranker_role.model
+        else None
+    )
+    vector_store = InMemoryVectorStore.from_workspace_docs(workspace, embedding_client=embedding_client)
+    memory_retriever = MemoryRetriever(memory_store, vector_store=vector_store, reranker=reranker, top_k=config.memory.top_k)
     memory_consolidator = MemoryConsolidator(workspace, memory_store)
     memory_optimizer = MemoryOptimizer(memory_consolidator)
     schedule_store = ScheduleStore(workspace)
-    proactive_loop = ProactiveLoop(workspace)
-    drift_runner = DriftRunner(workspace)
+    drift_runner = DriftRunner(
+        workspace,
+        tracer=tracer,
+        enabled=config.drift.enabled,
+        min_interval_hours=config.drift.min_interval_hours,
+        max_steps=config.drift.max_steps,
+    )
+    proactive_loop = ProactiveLoop(
+        workspace,
+        quota=ProactiveQuota(
+            workspace,
+            daily_limit=config.proactive.daily_limit,
+            cooldown_seconds=config.proactive.cooldown_seconds,
+            quiet_hours=config.proactive.quiet_hours,
+        ),
+        schedule_store=schedule_store,
+        tracer=tracer,
+        threshold=config.proactive.threshold,
+        enabled=config.proactive.enabled,
+    )
     plugin_manager = PluginManager([ToolLoopGuardPlugin(), ShellSafetyPlugin(), ObservePlugin()])
 
     tool_registry = ToolRegistry(plugin_manager=plugin_manager)
@@ -68,9 +113,12 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
     if config.tools.enable_filesystem:
         tool_registry.register(FileReadTool(workspace))
         tool_registry.register(FileWriteTool(workspace))
+    if config.tools.enable_web:
+        tool_registry.register(WebFetchTool())
     tool_registry.register(MemoryWriteTool(memory_store))
     tool_registry.register(MemoryRecallTool(memory_store))
     tool_registry.register(ScheduleCreateTool(schedule_store))
+    tool_registry.register(ToolSearchTool(tool_registry))
 
     if config.llm.api_key:
         llm = OpenAICompatibleProvider(
@@ -98,6 +146,7 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
         plugin_manager=plugin_manager,
         memory_consolidator=memory_consolidator,
     )
+    subagent_runner = SubAgentRunner(agent)
     return RuntimeServices(
         agent=agent,
         session_manager=session_manager,
@@ -109,6 +158,7 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
         proactive_loop=proactive_loop,
         drift_runner=drift_runner,
         plugin_manager=plugin_manager,
+        subagent_runner=subagent_runner,
     )
 
 

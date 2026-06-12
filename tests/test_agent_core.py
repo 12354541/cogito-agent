@@ -6,6 +6,7 @@ from cogito_agent.agent.core import AgentCore
 from cogito_agent.agent.reasoner import RuleBasedReasoner
 from cogito_agent.agent.session import SessionManager
 from cogito_agent.agent.state import InboundMessage, Message
+from cogito_agent.agent.subagent import SubAgentRunner, SubAgentTask
 from cogito_agent.tracing.tracer import Tracer
 
 
@@ -43,3 +44,34 @@ def test_session_reset():
 
     manager.reset("default")
     assert manager.history("default") == []
+
+
+def test_subagent_runner_links_child_trace(tmp_path):
+    session_manager = SessionManager()
+    tracer = Tracer(workspace=tmp_path)
+    agent = AgentCore(session_manager=session_manager, reasoner=RuleBasedReasoner(), tracer=tracer)
+    parent_response = asyncio.run(agent.process(InboundMessage.from_cli("parent task")))
+    runner = SubAgentRunner(agent)
+
+    child_response = asyncio.run(
+        runner.run(
+            SubAgentTask(
+                name="analysis",
+                content="child task",
+                parent_trace_id=parent_response.trace_id,
+                parent_session_id=parent_response.session_id,
+            )
+        )
+    )
+
+    child_record = tracer.get_trace_record(child_response.trace_id)
+    parent_steps = tracer.get_trace_steps(parent_response.trace_id)
+
+    assert child_record is not None
+    assert child_record["metadata"]["parent_trace_id"] == parent_response.trace_id
+    assert any(
+        step["name"] == "trace_link_created"
+        and step["metadata"]["child_trace_id"] == child_response.trace_id
+        and step["metadata"]["relation"] == "subagent"
+        for step in parent_steps
+    )

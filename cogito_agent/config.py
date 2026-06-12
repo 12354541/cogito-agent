@@ -65,6 +65,8 @@ class AgentConfig:
 @dataclass(slots=True)
 class ToolsConfig:
     enable_filesystem: bool = True
+    enable_web: bool = False
+    enable_shell: bool = False
     require_approval_for_write: bool = False
 
 
@@ -72,6 +74,31 @@ class ToolsConfig:
 class MemoryConfig:
     enabled: bool = True
     top_k: int = 5
+
+
+@dataclass(slots=True)
+class TracingConfig:
+    enabled: bool = True
+    store: str = "jsonl"
+    redact_sensitive: bool = True
+    save_prompt_hash: bool = True
+    save_prompt_preview: bool = True
+
+
+@dataclass(slots=True)
+class ProactiveConfig:
+    enabled: bool = False
+    threshold: float = 0.6
+    daily_limit: int = 5
+    cooldown_seconds: int = 3600
+    quiet_hours: str = ""
+
+
+@dataclass(slots=True)
+class DriftConfig:
+    enabled: bool = False
+    max_steps: int = 30
+    min_interval_hours: float = 1.0
 
 
 @dataclass(slots=True)
@@ -84,6 +111,9 @@ class AppConfig:
     agent: AgentConfig = field(default_factory=AgentConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    tracing: TracingConfig = field(default_factory=TracingConfig)
+    proactive: ProactiveConfig = field(default_factory=ProactiveConfig)
+    drift: DriftConfig = field(default_factory=DriftConfig)
 
 
 def _env_name_for_role(role: str, key: str) -> str:
@@ -137,6 +167,9 @@ def load_config(path: Path | str = "config.toml") -> AppConfig:
     agent_data = data.get("agent", {})
     tools_data = data.get("tools", {})
     memory_data = data.get("memory", {})
+    tracing_data = data.get("tracing", {})
+    proactive_data = data.get("proactive", {})
+    drift_data = data.get("drift", {})
 
     workspace = Path(_resolve_env(app_data.get("workspace", os.getenv("COGITO_WORKSPACE", "workspace"))))
     if not workspace.is_absolute():
@@ -185,10 +218,31 @@ def load_config(path: Path | str = "config.toml") -> AppConfig:
         ),
         tools=ToolsConfig(
             enable_filesystem=bool(tools_data.get("enable_filesystem", True)),
+            enable_web=bool(tools_data.get("enable_web", False)),
+            enable_shell=bool(tools_data.get("enable_shell", False)),
             require_approval_for_write=bool(tools_data.get("require_approval_for_write", False)),
         ),
         memory=MemoryConfig(
             enabled=bool(memory_data.get("enabled", True)),
             top_k=int(memory_data.get("top_k", 5)),
+        ),
+        tracing=TracingConfig(
+            enabled=bool(tracing_data.get("enabled", True)),
+            store=str(tracing_data.get("store", "jsonl")),
+            redact_sensitive=bool(tracing_data.get("redact_sensitive", True)),
+            save_prompt_hash=bool(tracing_data.get("save_prompt_hash", True)),
+            save_prompt_preview=bool(tracing_data.get("save_prompt_preview", True)),
+        ),
+        proactive=ProactiveConfig(
+            enabled=bool(proactive_data.get("enabled", False)),
+            threshold=float(proactive_data.get("threshold", 0.6)),
+            daily_limit=int(proactive_data.get("daily_limit", 5)),
+            cooldown_seconds=int(proactive_data.get("cooldown_seconds", 3600)),
+            quiet_hours=str(proactive_data.get("quiet_hours", "")),
+        ),
+        drift=DriftConfig(
+            enabled=bool(drift_data.get("enabled", False)),
+            max_steps=int(drift_data.get("max_steps", 30)),
+            min_interval_hours=float(drift_data.get("min_interval_hours", 1.0)),
         ),
     )

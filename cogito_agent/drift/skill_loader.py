@@ -27,19 +27,31 @@ class SkillLoader:
         return skills
 
     def ensure_builtin_skills(self) -> None:
-        skill_dir = self.skills_dir / "audit-dirty-memories"
+        self._ensure_skill(
+            name="audit-dirty-memories",
+            description="Audit pending and long-term memory files for obvious issues.",
+            body="Check memory files and write a lightweight audit note.",
+        )
+        self._ensure_skill(
+            name="self-diagnosis",
+            description="Check runtime background task health and append a diagnosis note.",
+            body="Review prompt, memory, tool loop, and background-task health.",
+        )
+
+    def _ensure_skill(self, *, name: str, description: str, body: str) -> None:
+        skill_dir = self.skills_dir / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_path = skill_dir / "SKILL.md"
         if not skill_path.exists():
             skill_path.write_text(
-                """---
-name: audit-dirty-memories
-description: Audit pending and long-term memory files for obvious issues.
+                f"""---
+name: {name}
+description: {description}
 ---
 
 ## Goal
 
-Check memory files and write a lightweight audit note.
+{body}
 """,
                 encoding="utf-8",
             )

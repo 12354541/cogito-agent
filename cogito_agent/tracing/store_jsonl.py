@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from cogito_agent.agent.state import utc_now_iso
 
@@ -20,3 +20,13 @@ class JSONLTraceStore:
         path = self.trace_dir / f"{today}.jsonl"
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+
+    def iter_trace(self, trace_id: str) -> Iterable[dict[str, Any]]:
+        for path in sorted(self.trace_dir.glob("*.jsonl")):
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    payload = json.loads(line)
+                    if payload.get("trace_id") == trace_id:
+                        yield payload

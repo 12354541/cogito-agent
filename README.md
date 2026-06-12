@@ -6,16 +6,19 @@ memory.
 
 ## Current Capabilities
 
-- CLI chat loop with `/history`, `/tools`, `/memory`, `/trace last`
+- CLI chat loop with `/history`, `/tools`, `/memory`, `/forget`, `/trace last`
 - OpenAI-compatible provider, tested with DeepSeek configuration
 - PromptManager with system prompt, session history, and memory injection
 - ToolRegistry with schema export, argument validation, risk checks, and trace
-- Built-in tools: calculator, current time, workspace file read/write, memory write/recall, schedule create
-- JSONL trace store under `workspace/traces`
-- FastAPI app with `/chat`, `/tools`, `/memory`, `/traces/{trace_id}`, `/schedules`, `/plugins`, `/proactive/status`, `/drift/skills`
+- Built-in tools: calculator, current time, workspace file read/write, memory write/recall, tool search, optional web fetch, schedule create
+- JSONL trace store under `workspace/traces` or optional SQLite trace store, with structured trace step/tool/memory queries
+- FastAPI app with `/chat`, `/dashboard`, session reset/history, `/tools`, `/memory`, `/traces/{trace_id}`, `/traces/{trace_id}/steps`, `/schedules`, `/schedules/due`, `/plugins`, `/proactive/status`, `/proactive/outbox`, `/drift/skills`
 - Plugin lifecycle and tool interception with built-in observe, shell safety, and loop guard plugins
-- Markdown memory consolidation plus dependency-free lexical RAG over `workspace/docs`
-- File-backed Scheduler, Proactive single-tick decisions, and Drift skill audit runner
+- Markdown memory consolidation plus lexical or embedding-backed RAG over `workspace/docs`, with optional reranking
+- SubAgent runner with parent/child trace linkage for scoped child tasks
+- File-backed Scheduler with due detection and create/update/cancel APIs
+- Proactive tick loop with alert/content/context scoring, quota, cooldown, quiet hours, outbox delivery records, schedule triggering, and trace events
+- Drift runner with SKILL.md loading, built-in audit/self-diagnosis skills, min-interval state, finish markers, and trace events
 - Offline rule-based fallback when `LLM_API_KEY` is not configured
 
 ## Setup

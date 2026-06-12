@@ -10,6 +10,8 @@ __all__ = [
     "RuleBasedReasoner",
     "LLMReasoner",
     "SessionManager",
+    "SubAgentRunner",
+    "SubAgentTask",
 ]
 
 
@@ -26,6 +28,10 @@ def __getattr__(name: str) -> Any:
         from cogito_agent.agent.session import SessionManager
 
         return SessionManager
+    if name in {"SubAgentRunner", "SubAgentTask"}:
+        from cogito_agent.agent.subagent import SubAgentRunner, SubAgentTask
+
+        return {"SubAgentRunner": SubAgentRunner, "SubAgentTask": SubAgentTask}[name]
     if name in {"AgentResponse", "InboundMessage", "Message"}:
         from cogito_agent.agent.state import AgentResponse, InboundMessage, Message
 

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from cogito_agent.memory.markdown_store import MarkdownMemoryStore
 from cogito_agent.memory.models import MemoryHit, RagHit
 from cogito_agent.memory.vector_store import InMemoryVectorStore
+from cogito_agent.llm.reranker import RerankerClient
 from cogito_agent.tracing.context import TraceContext
 
 if TYPE_CHECKING:
@@ -27,10 +28,12 @@ class MemoryRetriever:
         store: MarkdownMemoryStore,
         *,
         vector_store: InMemoryVectorStore | None = None,
+        reranker: RerankerClient | None = None,
         top_k: int = 5,
     ) -> None:
         self.store = store
         self.vector_store = vector_store
+        self.reranker = reranker
         self.top_k = top_k
 
     def search(
@@ -57,6 +60,8 @@ class MemoryRetriever:
             )
             for hit in (self.vector_store.search(query, top_k=self.top_k) if self.vector_store else [])
         ]
+        if self.reranker and doc_hits:
+            doc_hits = self._rerank_docs(query, doc_hits)
         if trace and tracer:
             tracer.record_event(
                 trace,
@@ -69,3 +74,15 @@ class MemoryRetriever:
                 },
             )
         return RetrievalResult(memory_hits=memory_hits, doc_hits=doc_hits)
+
+    def _rerank_docs(self, query: str, doc_hits: list[RagHit]) -> list[RagHit]:
+        ranked = self.reranker.rerank(query, [hit.content_preview for hit in doc_hits], top_k=self.top_k)
+        by_index = {index: score for index, score in ranked}
+        reranked: list[RagHit] = []
+        for index, hit in enumerate(doc_hits):
+            if index not in by_index:
+                continue
+            hit.score = by_index[index]
+            hit.metadata = {**hit.metadata, "reranked": True}
+            reranked.append(hit)
+        return sorted(reranked, key=lambda hit: hit.score, reverse=True)[: self.top_k]

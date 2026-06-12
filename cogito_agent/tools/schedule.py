@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -39,6 +40,12 @@ class ScheduleStore:
         items.append(item)
         self._save(items)
 
+    def get(self, schedule_id: str) -> ScheduleItem | None:
+        for item in self.list():
+            if item.schedule_id == schedule_id:
+                return item
+        return None
+
     def cancel(self, schedule_id: str) -> bool:
         items = self.list()
         changed = False
@@ -49,6 +56,39 @@ class ScheduleStore:
         if changed:
             self._save(items)
         return changed
+
+    def update(self, schedule_id: str, **changes: Any) -> ScheduleItem | None:
+        items = self.list()
+        updated: ScheduleItem | None = None
+        for item in items:
+            if item.schedule_id != schedule_id:
+                continue
+            for key, value in changes.items():
+                if value is not None and hasattr(item, key):
+                    setattr(item, key, value)
+            updated = item
+        if updated:
+            self._save(items)
+        return updated
+
+    def due(self, now: datetime | None = None) -> list[ScheduleItem]:
+        now = now or datetime.now(timezone.utc)
+        return [item for item in self.list() if _is_due(item, now)]
+
+    def mark_triggered(self, schedule_id: str, triggered_at: datetime | None = None) -> ScheduleItem | None:
+        triggered_at = triggered_at or datetime.now(timezone.utc)
+        items = self.list()
+        updated: ScheduleItem | None = None
+        for item in items:
+            if item.schedule_id != schedule_id:
+                continue
+            item.metadata = {**item.metadata, "last_triggered_at": triggered_at.isoformat()}
+            if item.trigger == "once":
+                item.enabled = False
+            updated = item
+        if updated:
+            self._save(items)
+        return updated
 
     def _save(self, items: list[ScheduleItem]) -> None:
         self.path.write_text(json.dumps([asdict(item) for item in items], ensure_ascii=False, indent=2), encoding="utf-8")
@@ -85,3 +125,66 @@ class ScheduleCreateTool(Tool):
         )
         self.store.add(item)
         return ToolResult(content=f"Created schedule {item.schedule_id}.", success=True, metadata={"schedule_id": item.schedule_id})
+
+
+def _is_due(item: ScheduleItem, now: datetime) -> bool:
+    if not item.enabled:
+        return False
+    last_triggered_at = _parse_dt(item.metadata.get("last_triggered_at"))
+    if item.trigger == "once":
+        run_at = _parse_dt(item.metadata.get("run_at") or item.cron_expr)
+        if run_at is None:
+            return last_triggered_at is None
+        return last_triggered_at is None and now >= run_at
+    if item.trigger == "every":
+        interval_seconds = _parse_interval_seconds(item.cron_expr or item.metadata.get("interval") or item.metadata.get("interval_seconds"))
+        if interval_seconds <= 0:
+            return False
+        if last_triggered_at is None:
+            return True
+        return (now - last_triggered_at).total_seconds() >= interval_seconds
+    if item.trigger == "cron":
+        return _cron_due(item, now, last_triggered_at)
+    return False
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_interval_seconds(value: Any) -> int:
+    if value is None:
+        return 0
+    text = str(value).strip().lower()
+    if text.isdigit():
+        return int(text)
+    multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    suffix = text[-1:]
+    if suffix in multipliers and text[:-1].isdigit():
+        return int(text[:-1]) * multipliers[suffix]
+    return 0
+
+
+def _cron_due(item: ScheduleItem, now: datetime, last_triggered_at: datetime | None) -> bool:
+    expr = (item.cron_expr or "").strip()
+    if expr == "@daily":
+        if last_triggered_at and last_triggered_at.date() == now.date():
+            return False
+        return True
+    if ":" in expr:
+        hour_text, minute_text = expr.split(":", 1)
+        if not (hour_text.isdigit() and minute_text.isdigit()):
+            return False
+        due_today = now.replace(hour=int(hour_text), minute=int(minute_text), second=0, microsecond=0)
+        if now < due_today:
+            return False
+        return not last_triggered_at or last_triggered_at.date() < now.date()
+    return False
