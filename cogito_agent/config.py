@@ -108,6 +108,7 @@ class DriftConfig:
 @dataclass(slots=True)
 class SessionConfig:
     store: str = "jsonl"
+    max_messages: int = 40
 
 
 @dataclass(slots=True)
@@ -161,6 +162,17 @@ def _role_config(
         max_tokens=int(_choose(_env_name_for_role(role, "max_tokens"), data.get("max_tokens"), defaults.get("max_tokens", 2048))),
         enable_thinking=bool(data.get("enable_thinking", defaults.get("enable_thinking", False))),
         multimodal=bool(data.get("multimodal", defaults.get("multimodal", False))),
+    )
+
+
+def _load_session_config(data: dict[str, Any]) -> SessionConfig:
+    store = str(data.get("store", "jsonl"))
+    if store not in {"jsonl", "sqlite"}:
+        msg = f"Invalid session store: {store!r}. Expected 'jsonl' or 'sqlite'."
+        raise ValueError(msg)
+    return SessionConfig(
+        store=store,
+        max_messages=int(data.get("max_messages", 40)),
     )
 
 
@@ -227,9 +239,7 @@ def load_config(path: Path | str = "config.toml") -> AppConfig:
             max_iterations=int(agent_data.get("max_iterations", 8)),
             memory_window=int(agent_data.get("memory_window", _get_nested(agent_data, "context", "memory_window", default=40))),
         ),
-        session=SessionConfig(
-            store=str(session_data.get("store", "jsonl")),
-        ),
+        session=_load_session_config(session_data),
         tools=ToolsConfig(
             enable_filesystem=bool(tools_data.get("enable_filesystem", True)),
             enable_web=bool(tools_data.get("enable_web", False)),

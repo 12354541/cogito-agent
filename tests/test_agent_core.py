@@ -108,6 +108,36 @@ def test_session_manager_restart_recovery_sqlite(tmp_path):
     assert history[1].content == "second"
 
 
+def test_session_reset_then_append_survives_reload_jsonl(tmp_path):
+    store = JSONLSessionStore(tmp_path)
+    manager = SessionManager(store=store, max_messages=10)
+
+    manager.append(Message.user(InboundMessage.from_cli("before"), trace_id="t1"))
+    manager.reset("default")
+    manager.append(Message.user(InboundMessage.from_cli("after"), trace_id="t2"))
+
+    fresh = SessionManager(store=JSONLSessionStore(tmp_path), max_messages=10)
+    history = fresh.history("default")
+
+    assert len(history) == 1
+    assert history[0].content == "after"
+
+
+def test_session_reset_then_append_survives_reload_sqlite(tmp_path):
+    store = SQLiteSessionStore(tmp_path)
+    manager = SessionManager(store=store, max_messages=10)
+
+    manager.append(Message.user(InboundMessage.from_cli("before"), trace_id="t1"))
+    manager.reset("default")
+    manager.append(Message.user(InboundMessage.from_cli("after"), trace_id="t2"))
+
+    fresh = SessionManager(store=SQLiteSessionStore(tmp_path), max_messages=10)
+    history = fresh.history("default")
+
+    assert len(history) == 1
+    assert history[0].content == "after"
+
+
 def test_subagent_runner_links_child_trace(tmp_path):
     session_manager = SessionManager(store=MemorySessionStore())
     tracer = Tracer(workspace=tmp_path)

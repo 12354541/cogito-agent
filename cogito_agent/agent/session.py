@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -40,13 +41,21 @@ class JSONLSessionStore(SessionStore):
     def __init__(self, workspace: Path) -> None:
         self.session_dir = workspace / "sessions"
         self.session_dir.mkdir(parents=True, exist_ok=True)
+        self._locks: dict[str, threading.Lock] = {}
+
+    def _lock_for(self, session_id: str) -> threading.Lock:
+        if session_id not in self._locks:
+            self._locks[session_id] = threading.Lock()
+        return self._locks[session_id]
 
     def load(self, session_id: str) -> Session:
         session = Session(session_id=session_id)
         path = self._path(session_id)
         if not path.exists():
             return session
-        for line in path.read_text(encoding="utf-8").splitlines():
+        with self._lock_for(session_id):
+            raw = path.read_text(encoding="utf-8")
+        for line in raw.splitlines():
             if not line.strip():
                 continue
             payload = json.loads(line)
@@ -69,8 +78,9 @@ class JSONLSessionStore(SessionStore):
         self._append(session_id, {"event": "session_reset", "delta": {}})
 
     def _append(self, session_id: str, payload: dict[str, Any]) -> None:
-        with self._path(session_id).open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+        with self._lock_for(session_id):
+            with self._path(session_id).open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
 
     def _path(self, session_id: str) -> Path:
         safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in session_id)
@@ -137,10 +147,7 @@ class SQLiteSessionStore(SessionStore):
                 (session_id,),
             ).fetchall()
             for row in delta_rows:
-                delta = json.loads(row["delta_json"])
-                if delta.get("type") == "reset":
-                    session.messages = []
-                session.state_deltas.append(delta)
+                session.state_deltas.append(json.loads(row["delta_json"]))
         return session
 
     def append_message(self, message: Message) -> None:
@@ -191,9 +198,6 @@ class MemorySessionStore(SessionStore):
         session = Session(session_id=session_id)
         session.messages = list(self._messages.get(session_id, []))
         session.state_deltas = list(self._deltas.get(session_id, []))
-        for delta in session.state_deltas:
-            if delta.get("type") == "reset":
-                session.messages = []
         return session
 
     def append_message(self, message: Message) -> None:

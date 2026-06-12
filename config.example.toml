@@ -104,7 +104,8 @@ max_iterations = 8
 memory_window = 40
 
 [session]
-store = "jsonl"
+store = "jsonl"       # jsonl | sqlite
+max_messages = 40
 
 [tools]
 enable_filesystem = true

@@ -64,7 +64,7 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
         session_store = SQLiteSessionStore(workspace)
     else:
         session_store = JSONLSessionStore(workspace)
-    session_manager = SessionManager(store=session_store, max_messages=config.agent.memory_window)
+    session_manager = SessionManager(store=session_store, max_messages=config.session.max_messages)
     tracer = Tracer(
         workspace=workspace,
         store=config.tracing.store,
