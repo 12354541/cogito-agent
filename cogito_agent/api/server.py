@@ -40,17 +40,63 @@ class ScheduleUpdateRequest(BaseModel):
     enabled: bool | None = None
 
 
+class PromptUpdateRequest(BaseModel):
+    content: str
+    reason: str = "manual_update"
+
+
+class DriftSkillRequest(BaseModel):
+    description: str = ""
+    body: str
+
+
+class ProactiveConfigRequest(BaseModel):
+    enabled: bool | None = None
+    threshold: float | None = None
+    daily_limit: int | None = None
+    cooldown_seconds: int | None = None
+    quiet_hours: str | None = None
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     runtime = build_default_runtime(config or load_config())
     app = FastAPI(title="Cogito-Agent Runtime")
 
-    @app.get("/dashboard", response_class=HTMLResponse)
-    async def dashboard() -> str:
+    def dashboard_payload() -> dict[str, Any]:
         tools = runtime.tool_registry.list_tools()
         memories = runtime.memory_store.list_entries()
         schedules = runtime.schedule_store.list()
         traces = runtime.tracer.list_traces(limit=10)
-        tool_stats = runtime.tracer.tool_stats()["tools"]
+        return {
+            "metrics": {
+                "tools": len(tools),
+                "memories": len(memories),
+                "schedules": len(schedules),
+                "traces": len(traces),
+                "outbox_messages": len(runtime.proactive_loop.push_store.list()),
+            },
+            "health": _health(runtime),
+            "tools": [
+                {"name": tool.name, "description": tool.description, "risk_level": tool.risk_level, "enabled": tool.enabled}
+                for tool in tools
+            ],
+            "memory": [asdict(memory) for memory in memories],
+            "schedules": [asdict(item) for item in schedules],
+            "traces": traces,
+            "tool_stats": runtime.tracer.tool_stats()["tools"],
+            "proactive": runtime.proactive_loop.status(),
+            "drift": runtime.drift_runner.status(),
+            "prompt": asdict(runtime.prompt_store.get_current()),
+        }
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def dashboard() -> str:
+        payload = dashboard_payload()
+        tools = runtime.tool_registry.list_tools()
+        memories = runtime.memory_store.list_entries()
+        schedules = runtime.schedule_store.list()
+        traces = payload["traces"]
+        tool_stats = payload["tool_stats"]
         last_trace_id = runtime.tracer.last_trace_id
         rows = "\n".join(
             f"<tr><td>{escape(item.schedule_id)}</td><td>{escape(item.name)}</td><td>{escape(item.trigger)}</td><td>{item.enabled}</td></tr>"
@@ -130,6 +176,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         </html>
         """
 
+    @app.get("/dashboard/data")
+    async def dashboard_data() -> dict[str, Any]:
+        return dashboard_payload()
+
+    @app.get("/health")
+    async def health() -> dict[str, Any]:
+        return _health(runtime)
+
     @app.post("/chat")
     async def chat(request: ChatRequest) -> dict[str, Any]:
         inbound = InboundMessage(
@@ -180,6 +234,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def optimize_memory() -> dict[str, Any]:
         result = runtime.memory_optimizer.run_once()
         return asdict(result)
+
+    @app.get("/prompts/system")
+    async def get_system_prompt() -> dict[str, Any]:
+        return asdict(runtime.prompt_store.get_current())
+
+    @app.put("/prompts/system")
+    async def update_system_prompt(request: PromptUpdateRequest) -> dict[str, Any]:
+        return asdict(runtime.prompt_store.update(request.content, metadata={"reason": request.reason}))
+
+    @app.get("/prompts/system/history")
+    async def system_prompt_history(limit: int = 20) -> dict[str, Any]:
+        return {"versions": [asdict(snapshot) for snapshot in runtime.prompt_store.history(limit=limit)]}
 
     @app.get("/traces")
     async def traces(limit: int = 20) -> dict[str, Any]:
@@ -265,6 +331,21 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def proactive_status() -> dict[str, Any]:
         return runtime.proactive_loop.status()
 
+    @app.patch("/proactive/config")
+    async def proactive_config(request: ProactiveConfigRequest) -> dict[str, Any]:
+        if request.enabled is not None:
+            runtime.proactive_loop.enabled = request.enabled
+        if request.threshold is not None:
+            runtime.proactive_loop.threshold = request.threshold
+            runtime.proactive_loop.agent_tick.threshold = request.threshold
+        if request.daily_limit is not None:
+            runtime.proactive_loop.quota.daily_limit = request.daily_limit
+        if request.cooldown_seconds is not None:
+            runtime.proactive_loop.quota.cooldown_seconds = request.cooldown_seconds
+        if request.quiet_hours is not None:
+            runtime.proactive_loop.quota.quiet_hours = request.quiet_hours
+        return runtime.proactive_loop.status()
+
     @app.post("/proactive/tick")
     async def proactive_tick() -> dict[str, Any]:
         return asdict(runtime.proactive_loop.tick_once())
@@ -277,6 +358,34 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def drift_skills() -> dict[str, Any]:
         return runtime.drift_runner.status()
 
+    @app.get("/drift/skills/{name}")
+    async def drift_skill(name: str) -> dict[str, Any]:
+        try:
+            skill = runtime.drift_runner.loader.get_skill(name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if skill is None:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        return asdict(skill)
+
+    @app.put("/drift/skills/{name}")
+    async def upsert_drift_skill(name: str, request: DriftSkillRequest) -> dict[str, Any]:
+        try:
+            skill = runtime.drift_runner.loader.upsert_skill(name=name, description=request.description, body=request.body)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return asdict(skill)
+
+    @app.delete("/drift/skills/{name}")
+    async def delete_drift_skill(name: str) -> dict[str, Any]:
+        try:
+            deleted = runtime.drift_runner.loader.delete_skill(name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Skill not found")
+        return {"name": name, "status": "deleted"}
+
     @app.post("/drift/run")
     async def drift_run() -> dict[str, Any]:
         return asdict(runtime.drift_runner.run_once(force=True))
@@ -285,3 +394,15 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
 
 
 app = create_app()
+
+
+def _health(runtime: Any) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "tools": {"count": len(runtime.tool_registry.list_tools())},
+        "memory": {"count": len(runtime.memory_store.list_entries())},
+        "tracing": {"last_trace_id": runtime.tracer.last_trace_id, "store": runtime.tracer.store.__class__.__name__},
+        "scheduler": {"count": len(runtime.schedule_store.list()), "due": len(runtime.schedule_store.due())},
+        "proactive": runtime.proactive_loop.status(),
+        "drift": runtime.drift_runner.status(),
+    }

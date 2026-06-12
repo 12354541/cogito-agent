@@ -26,6 +26,7 @@ from cogito_agent.plugins.manager import PluginManager
 from cogito_agent.proactive.loop import ProactiveLoop
 from cogito_agent.proactive.quota import ProactiveQuota
 from cogito_agent.prompting.manager import PromptManager
+from cogito_agent.prompting.store import PromptStore
 from cogito_agent.tools.calculator import CalculatorTool
 from cogito_agent.tools.filesystem import FileReadTool, FileWriteTool
 from cogito_agent.tools.memory_tools import MemoryRecallTool, MemoryWriteTool
@@ -50,6 +51,7 @@ class RuntimeServices:
     drift_runner: DriftRunner
     plugin_manager: PluginManager
     subagent_runner: SubAgentRunner
+    prompt_store: PromptStore
 
 
 def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
@@ -89,6 +91,7 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
     memory_retriever = MemoryRetriever(memory_store, vector_store=vector_store, reranker=reranker, top_k=config.memory.top_k)
     memory_consolidator = MemoryConsolidator(workspace, memory_store)
     memory_optimizer = MemoryOptimizer(memory_consolidator)
+    prompt_store = PromptStore(workspace, Path(__file__).parents[1] / "prompting" / "system_prompt.md")
     schedule_store = ScheduleStore(workspace)
     drift_runner = DriftRunner(
         workspace,
@@ -136,7 +139,7 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
         )
         reasoner = LLMReasoner(
             llm_provider=llm,
-            prompt_manager=PromptManager(),
+            prompt_manager=PromptManager(system_prompt_path=prompt_store.current_path),
             tool_registry=tool_registry,
             memory_retriever=memory_retriever if config.memory.enabled else None,
             max_iterations=config.agent.max_iterations,
@@ -164,6 +167,7 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
         drift_runner=drift_runner,
         plugin_manager=plugin_manager,
         subagent_runner=subagent_runner,
+        prompt_store=prompt_store,
     )
 
 

@@ -50,6 +50,21 @@ def test_dashboard_endpoint(tmp_path):
     assert "Schedules" in response.text
 
 
+def test_dashboard_data_and_health_endpoints(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    dashboard = client.get("/dashboard/data")
+    health = client.get("/health")
+
+    assert dashboard.status_code == 200
+    assert dashboard.json()["metrics"]["tools"] > 0
+    assert "tool_stats" in dashboard.json()
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+
+
 def test_api_trace_subresources(tmp_path):
     config = AppConfig(workspace=tmp_path)
     app = create_app(config)
@@ -145,3 +160,54 @@ def test_api_due_schedules_and_proactive_outbox(tmp_path):
     assert tick.json()["should_send"] is True
     assert outbox.status_code == 200
     assert outbox.json()["messages"][0]["title"] == "demo"
+
+
+def test_api_prompt_management(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    current = client.get("/prompts/system")
+    updated = client.put("/prompts/system", json={"content": "You are a test agent.", "reason": "test"})
+    history = client.get("/prompts/system/history")
+
+    assert current.status_code == 200
+    assert updated.status_code == 200
+    assert updated.json()["metadata"]["reason"] == "test"
+    assert history.status_code == 200
+    assert history.json()["versions"][0]["content"] == "You are a test agent."
+
+
+def test_api_drift_skill_management(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    created = client.put("/drift/skills/custom-skill", json={"description": "Custom", "body": "## Goal\nDo work"})
+    fetched = client.get("/drift/skills/custom-skill")
+    deleted = client.delete("/drift/skills/custom-skill")
+
+    assert created.status_code == 200
+    assert created.json()["name"] == "custom-skill"
+    assert fetched.status_code == 200
+    assert fetched.json()["description"] == "Custom"
+    assert deleted.status_code == 200
+
+
+def test_api_proactive_config_update(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    response = client.patch(
+        "/proactive/config",
+        json={"enabled": True, "threshold": 0.9, "daily_limit": 1, "cooldown_seconds": 5, "quiet_hours": "23:00-06:00"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["enabled"] is True
+    assert data["threshold"] == 0.9
+    assert data["quota"]["daily_limit"] == 1
+    assert data["quota"]["cooldown_seconds"] == 5
+    assert data["quota"]["quiet_hours"] == "23:00-06:00"
