@@ -106,6 +106,11 @@ class DriftConfig:
 
 
 @dataclass(slots=True)
+class SessionConfig:
+    store: str = "jsonl"
+
+
+@dataclass(slots=True)
 class AppConfig:
     """Runtime config loaded from config.toml and environment variables."""
 
@@ -113,6 +118,7 @@ class AppConfig:
     debug: bool = False
     llm: LLMConfig = field(default_factory=LLMConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    session: SessionConfig = field(default_factory=SessionConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     tracing: TracingConfig = field(default_factory=TracingConfig)
@@ -169,6 +175,7 @@ def load_config(path: Path | str = "config.toml") -> AppConfig:
     llm_data = data.get("llm", {})
     llm_main = llm_data.get("main", {}) if isinstance(llm_data, dict) else {}
     agent_data = data.get("agent", {})
+    session_data = data.get("session", {})
     tools_data = data.get("tools", {})
     memory_data = data.get("memory", {})
     tracing_data = data.get("tracing", {})
@@ -219,6 +226,9 @@ def load_config(path: Path | str = "config.toml") -> AppConfig:
         agent=AgentConfig(
             max_iterations=int(agent_data.get("max_iterations", 8)),
             memory_window=int(agent_data.get("memory_window", _get_nested(agent_data, "context", "memory_window", default=40))),
+        ),
+        session=SessionConfig(
+            store=str(session_data.get("store", "jsonl")),
         ),
         tools=ToolsConfig(
             enable_filesystem=bool(tools_data.get("enable_filesystem", True)),

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from cogito_agent.agent.core import AgentCore
 from cogito_agent.agent.reasoner import LLMReasoner, RuleBasedReasoner
-from cogito_agent.agent.session import JSONLSessionStore, SessionManager
+from cogito_agent.agent.session import JSONLSessionStore, SessionManager, SessionStore, SQLiteSessionStore
 from cogito_agent.agent.state import InboundMessage
 from cogito_agent.agent.subagent import SubAgentRunner
 from cogito_agent.cli.commands import HELP_TEXT, CommandResult
@@ -59,7 +59,12 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
     workspace = config.workspace
     workspace.mkdir(parents=True, exist_ok=True)
 
-    session_manager = SessionManager(max_messages=config.agent.memory_window, store=JSONLSessionStore(workspace))
+    session_store: SessionStore
+    if config.session.store == "sqlite":
+        session_store = SQLiteSessionStore(workspace)
+    else:
+        session_store = JSONLSessionStore(workspace)
+    session_manager = SessionManager(store=session_store, max_messages=config.agent.memory_window)
     tracer = Tracer(
         workspace=workspace,
         store=config.tracing.store,

@@ -4,14 +4,14 @@ import asyncio
 
 from cogito_agent.agent.core import AgentCore
 from cogito_agent.agent.reasoner import RuleBasedReasoner
-from cogito_agent.agent.session import JSONLSessionStore, SessionManager
+from cogito_agent.agent.session import JSONLSessionStore, MemorySessionStore, SessionManager, SQLiteSessionStore
 from cogito_agent.agent.state import InboundMessage, Message
 from cogito_agent.agent.subagent import SubAgentRunner, SubAgentTask
 from cogito_agent.tracing.tracer import Tracer
 
 
 def test_agent_process_returns_echo_and_trace_id(tmp_path):
-    session_manager = SessionManager()
+    session_manager = SessionManager(store=MemorySessionStore())
     tracer = Tracer(workspace=tmp_path)
     agent = AgentCore(session_manager=session_manager, reasoner=RuleBasedReasoner(), tracer=tracer)
 
@@ -23,7 +23,7 @@ def test_agent_process_returns_echo_and_trace_id(tmp_path):
 
 
 def test_session_history_keeps_user_and_assistant(tmp_path):
-    session_manager = SessionManager()
+    session_manager = SessionManager(store=MemorySessionStore())
     tracer = Tracer(workspace=tmp_path)
     agent = AgentCore(session_manager=session_manager, reasoner=RuleBasedReasoner(), tracer=tracer)
 
@@ -36,7 +36,7 @@ def test_session_history_keeps_user_and_assistant(tmp_path):
 
 
 def test_session_reset():
-    manager = SessionManager()
+    manager = SessionManager(store=MemorySessionStore())
     inbound = InboundMessage.from_cli("hello")
 
     manager.append(Message.user(inbound, trace_id="trace_test"))
@@ -62,8 +62,54 @@ def test_session_manager_persists_jsonl(tmp_path):
     assert reloaded.state_deltas("default")[-1]["type"] == "message_appended"
 
 
+def test_session_manager_persists_sqlite(tmp_path):
+    store = SQLiteSessionStore(tmp_path)
+    manager = SessionManager(store=store)
+    inbound = InboundMessage.from_cli("hello sqlite")
+    message = Message.user(inbound, trace_id="trace_sqlite")
+
+    manager.append(message)
+    reloaded = SessionManager(store=store)
+
+    history = reloaded.history("default")
+    assert len(history) == 1
+    assert history[0].message_id == message.message_id
+    assert history[0].trace_id == "trace_sqlite"
+
+
+def test_session_manager_restart_recovery(tmp_path):
+    store = JSONLSessionStore(tmp_path)
+    manager = SessionManager(store=store, max_messages=10)
+
+    manager.append(Message.user(InboundMessage.from_cli("msg1"), trace_id="t1"))
+    manager.append(Message.user(InboundMessage.from_cli("msg2"), trace_id="t2"))
+
+    fresh = SessionManager(store=JSONLSessionStore(tmp_path), max_messages=10)
+    history = fresh.history("default")
+
+    assert len(history) == 2
+    assert history[0].content == "msg1"
+    assert history[1].content == "msg2"
+    assert fresh.state_deltas("default")[-1]["type"] == "message_appended"
+
+
+def test_session_manager_restart_recovery_sqlite(tmp_path):
+    store = SQLiteSessionStore(tmp_path)
+    manager = SessionManager(store=store, max_messages=10)
+
+    manager.append(Message.user(InboundMessage.from_cli("first"), trace_id="t1"))
+    manager.append(Message.user(InboundMessage.from_cli("second"), trace_id="t2"))
+
+    fresh = SessionManager(store=SQLiteSessionStore(tmp_path), max_messages=10)
+    history = fresh.history("default")
+
+    assert len(history) == 2
+    assert history[0].content == "first"
+    assert history[1].content == "second"
+
+
 def test_subagent_runner_links_child_trace(tmp_path):
-    session_manager = SessionManager()
+    session_manager = SessionManager(store=MemorySessionStore())
     tracer = Tracer(workspace=tmp_path)
     agent = AgentCore(session_manager=session_manager, reasoner=RuleBasedReasoner(), tracer=tracer)
     parent_response = asyncio.run(agent.process(InboundMessage.from_cli("parent task")))

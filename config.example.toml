@@ -103,6 +103,9 @@ max_tokens = 512
 max_iterations = 8
 memory_window = 40
 
+[session]
+store = "jsonl"
+
 [tools]
 enable_filesystem = true
 enable_web = false
