@@ -58,7 +58,12 @@ def build_default_runtime(config: AppConfig | None = None) -> RuntimeServices:
     workspace.mkdir(parents=True, exist_ok=True)
 
     session_manager = SessionManager(max_messages=config.agent.memory_window)
-    tracer = Tracer(workspace=workspace, store=config.tracing.store)
+    tracer = Tracer(
+        workspace=workspace,
+        store=config.tracing.store,
+        otel_enabled=config.tracing.otel_enabled,
+        otel_service_name=config.tracing.otel_service_name,
+    )
     memory_store = MarkdownMemoryStore(workspace=workspace)
     embedding_role = config.llm.roles.get("embedding")
     embedding_client = (

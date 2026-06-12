@@ -32,6 +32,8 @@ multimodal = true
 [tracing]
 store = "sqlite"
 save_prompt_preview = false
+otel_enabled = true
+otel_service_name = "cogito-test"
 
 [tools]
 enable_web = true
@@ -60,6 +62,8 @@ min_interval_hours = 0.5
     assert config.llm.roles["multimodal"].multimodal is True
     assert config.tracing.store == "sqlite"
     assert config.tracing.save_prompt_preview is False
+    assert config.tracing.otel_enabled is True
+    assert config.tracing.otel_service_name == "cogito-test"
     assert config.tools.enable_web is True
     assert config.tools.enable_shell is False
     assert config.proactive.enabled is True

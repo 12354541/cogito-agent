@@ -30,3 +30,10 @@ class JSONLTraceStore:
                     payload = json.loads(line)
                     if payload.get("trace_id") == trace_id:
                         yield payload
+
+    def iter_events(self) -> Iterable[dict[str, Any]]:
+        for path in sorted(self.trace_dir.glob("*.jsonl")):
+            with path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        yield json.loads(line)

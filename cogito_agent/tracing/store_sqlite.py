@@ -49,6 +49,19 @@ class SQLiteTraceStore:
         for row in rows:
             yield json.loads(row["payload_json"])
 
+    def iter_events(self) -> Iterable[dict[str, Any]]:
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM trace_events
+                ORDER BY id ASC
+                """
+            ).fetchall()
+        for row in rows:
+            yield json.loads(row["payload_json"])
+
     def _init_db(self) -> None:
         with sqlite3.connect(self.path) as conn:
             conn.execute(

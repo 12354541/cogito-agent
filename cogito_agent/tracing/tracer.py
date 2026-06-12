@@ -8,6 +8,7 @@ from uuid import uuid4
 from cogito_agent.agent.state import utc_now_iso
 from cogito_agent.tracing.context import TraceContext
 from cogito_agent.tracing.models import TraceRecord, TraceSpan
+from cogito_agent.tracing.opentelemetry import OpenTelemetryExporter
 from cogito_agent.tracing.redaction import redact_mapping, redact_text
 from cogito_agent.tracing.store_jsonl import JSONLTraceStore
 from cogito_agent.tracing.store_sqlite import SQLiteTraceStore
@@ -33,8 +34,16 @@ def _duration_ms(started_at: str, ended_at: str) -> int:
 class Tracer:
     """Creates TraceContext and writes trace/span events to JSONL."""
 
-    def __init__(self, workspace: Path, store: str = "jsonl") -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        store: str = "jsonl",
+        *,
+        otel_enabled: bool = False,
+        otel_service_name: str = "cogito-agent",
+    ) -> None:
         self.store = _build_store(workspace=workspace, store=store)
+        self.otel = OpenTelemetryExporter(enabled=otel_enabled, service_name=otel_service_name)
         self.last_trace_id: str | None = None
         self._records: dict[str, TraceRecord] = {}
         self._spans: dict[str, list[TraceSpan]] = {}
@@ -114,6 +123,17 @@ class Tracer:
         span.ended_at = utc_now_iso()
         span.duration_ms = _duration_ms(span.started_at, span.ended_at)
         self._write("span_finished", trace.trace_id, span.to_dict())
+        self.otel.export_span(
+            name=span.name,
+            span_type=span.span_type,
+            status=span.status,
+            attributes={
+                "trace_id": span.trace_id,
+                "span_id": span.span_id,
+                "duration_ms": span.duration_ms or 0,
+                "error": span.error or "",
+            },
+        )
 
     def record_event(
         self,
@@ -233,6 +253,40 @@ class Tracer:
             for step in self.get_trace_steps(trace_id)
             if str(step.get("name", "")).startswith("memory_")
         ]
+
+    def list_traces(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        records: dict[str, dict[str, Any]] = {trace_id: record.to_dict() for trace_id, record in self._records.items()}
+        for entry in self.store.iter_events():
+            event = entry.get("event")
+            payload = entry.get("payload", {})
+            trace_id = entry.get("trace_id")
+            if not trace_id or event not in {"trace_started", "trace_finished"}:
+                continue
+            records[str(trace_id)] = payload
+        ordered = sorted(
+            records.values(),
+            key=lambda record: record.get("ended_at") or record.get("started_at") or "",
+            reverse=True,
+        )
+        return ordered[: max(limit, 1)]
+
+    def tool_stats(self) -> dict[str, Any]:
+        totals: dict[str, dict[str, Any]] = {}
+        for entry in self.store.iter_events():
+            if entry.get("event") != "tool_call_finished":
+                continue
+            metadata = entry.get("payload", {}).get("metadata", {})
+            tool_name = str(metadata.get("tool_name") or "unknown")
+            row = totals.setdefault(tool_name, {"tool_name": tool_name, "calls": 0, "successes": 0, "errors": 0, "total_duration_ms": 0})
+            row["calls"] += 1
+            if metadata.get("success"):
+                row["successes"] += 1
+            else:
+                row["errors"] += 1
+            row["total_duration_ms"] += int(metadata.get("duration_ms") or 0)
+        for row in totals.values():
+            row["avg_duration_ms"] = row["total_duration_ms"] / row["calls"] if row["calls"] else 0
+        return {"tools": sorted(totals.values(), key=lambda row: row["calls"], reverse=True)}
 
     def _write(self, event: str, trace_id: str, payload: dict[str, Any]) -> None:
         self.store.append(

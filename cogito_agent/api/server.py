@@ -49,6 +49,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         tools = runtime.tool_registry.list_tools()
         memories = runtime.memory_store.list_entries()
         schedules = runtime.schedule_store.list()
+        traces = runtime.tracer.list_traces(limit=10)
+        tool_stats = runtime.tracer.tool_stats()["tools"]
         last_trace_id = runtime.tracer.last_trace_id
         rows = "\n".join(
             f"<tr><td>{escape(item.schedule_id)}</td><td>{escape(item.name)}</td><td>{escape(item.trigger)}</td><td>{item.enabled}</td></tr>"
@@ -61,6 +63,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         tool_rows = "\n".join(
             f"<tr><td>{escape(tool.name)}</td><td>{escape(tool.risk_level)}</td><td>{tool.enabled}</td></tr>"
             for tool in tools
+        )
+        trace_rows = "\n".join(
+            f"<tr><td><a href=\"/traces/{escape(trace['trace_id'])}\">{escape(trace['trace_id'])}</a></td>"
+            f"<td>{escape(trace.get('session_id') or '')}</td><td>{escape(trace.get('status') or '')}</td>"
+            f"<td>{trace.get('duration_ms') or ''}</td><td>{escape(trace.get('user_message_preview') or '')}</td></tr>"
+            for trace in traces
+        )
+        tool_stat_rows = "\n".join(
+            f"<tr><td>{escape(row['tool_name'])}</td><td>{row['calls']}</td><td>{row['successes']}</td>"
+            f"<td>{row['errors']}</td><td>{row['avg_duration_ms']:.1f}</td></tr>"
+            for row in tool_stats
         )
         trace_link = f'<a href="/traces/{escape(last_trace_id)}">{escape(last_trace_id)}</a>' if last_trace_id else "No trace yet"
         return f"""
@@ -89,8 +102,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
               <div class="metric"><div>Tools</div><div class="value">{len(tools)}</div></div>
               <div class="metric"><div>Memories</div><div class="value">{len(memories)}</div></div>
               <div class="metric"><div>Schedules</div><div class="value">{len(schedules)}</div></div>
+              <div class="metric"><div>Traces</div><div class="value">{len(traces)}</div></div>
               <div class="metric"><div>Last trace</div><div>{trace_link}</div></div>
             </div>
+            <section>
+              <h2>Trace Timeline</h2>
+              <table><thead><tr><th>ID</th><th>Session</th><th>Status</th><th>Duration</th><th>Input</th></tr></thead><tbody>{trace_rows}</tbody></table>
+            </section>
+            <section>
+              <h2>Tool Stats</h2>
+              <table><thead><tr><th>Name</th><th>Calls</th><th>Successes</th><th>Errors</th><th>Avg ms</th></tr></thead><tbody>{tool_stat_rows}</tbody></table>
+            </section>
             <section>
               <h2>Tools</h2>
               <table><thead><tr><th>Name</th><th>Risk</th><th>Enabled</th></tr></thead><tbody>{tool_rows}</tbody></table>
@@ -158,6 +180,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     async def optimize_memory() -> dict[str, Any]:
         result = runtime.memory_optimizer.run_once()
         return asdict(result)
+
+    @app.get("/traces")
+    async def traces(limit: int = 20) -> dict[str, Any]:
+        return {"traces": runtime.tracer.list_traces(limit=limit)}
+
+    @app.get("/traces/stats/tools")
+    async def trace_tool_stats() -> dict[str, Any]:
+        return runtime.tracer.tool_stats()
 
     @app.get("/traces/{trace_id}")
     async def trace(trace_id: str) -> dict[str, Any]:

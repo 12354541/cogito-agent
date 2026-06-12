@@ -83,6 +83,8 @@ class TracingConfig:
     redact_sensitive: bool = True
     save_prompt_hash: bool = True
     save_prompt_preview: bool = True
+    otel_enabled: bool = False
+    otel_service_name: str = "cogito-agent"
 
 
 @dataclass(slots=True)
@@ -232,6 +234,8 @@ def load_config(path: Path | str = "config.toml") -> AppConfig:
             redact_sensitive=bool(tracing_data.get("redact_sensitive", True)),
             save_prompt_hash=bool(tracing_data.get("save_prompt_hash", True)),
             save_prompt_preview=bool(tracing_data.get("save_prompt_preview", True)),
+            otel_enabled=bool(tracing_data.get("otel_enabled", False)),
+            otel_service_name=str(tracing_data.get("otel_service_name", "cogito-agent")),
         ),
         proactive=ProactiveConfig(
             enabled=bool(proactive_data.get("enabled", False)),

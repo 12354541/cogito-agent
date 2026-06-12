@@ -73,6 +73,22 @@ def test_api_trace_subresources(tmp_path):
     assert memory.json()["memory"] == []
 
 
+def test_api_trace_list_and_tool_stats(tmp_path):
+    config = AppConfig(workspace=tmp_path)
+    app = create_app(config)
+    client = TestClient(app)
+
+    chat = client.post("/chat", json={"message": "ping", "session_id": "trace-list"})
+    trace_id = chat.json()["trace_id"]
+    traces = client.get("/traces")
+    stats = client.get("/traces/stats/tools")
+
+    assert traces.status_code == 200
+    assert traces.json()["traces"][0]["trace_id"] == trace_id
+    assert stats.status_code == 200
+    assert stats.json()["tools"] == []
+
+
 def test_api_memory_delete(tmp_path):
     config = AppConfig(workspace=tmp_path)
     app = create_app(config)
