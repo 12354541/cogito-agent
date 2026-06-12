@@ -9,6 +9,12 @@ from cogito_agent.tools.base import Tool, ToolResult
 class MemoryWriteTool(Tool):
     name = "memory_write"
     description = "Save a durable user preference or project fact to Markdown memory."
+    trace_policy = {
+        "sensitive_args": ["content"],
+        "preview_args": [],
+        "max_preview_chars": 200,
+        "store_hash": True,
+    }
     parameters = {
         "type": "object",
         "properties": {"content": {"type": "string", "description": "Fact or preference to remember."}},

@@ -98,6 +98,12 @@ class ScheduleStore:
 class ScheduleCreateTool(Tool):
     name = "schedule_create"
     description = "Create a local reminder or scheduled task."
+    trace_policy = {
+        "sensitive_args": [],
+        "preview_args": ["prompt"],
+        "max_preview_chars": 200,
+        "store_hash": False,
+    }
     parameters = {
         "type": "object",
         "properties": {

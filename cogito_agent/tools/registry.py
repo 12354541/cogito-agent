@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from cogito_agent.plugins.manager import PluginManager
 from cogito_agent.tools.base import RiskLevel, Tool, ToolResult
 from cogito_agent.tracing.context import TraceContext
+from cogito_agent.tracing.redaction import sanitize_tool_arguments, sanitize_tool_result
 
 if TYPE_CHECKING:
     from cogito_agent.tracing.tracer import Tracer
@@ -65,6 +66,7 @@ class ToolRegistry:
         if not decision.allow:
             return ToolResult(content="", success=False, error=decision.reason or "Tool blocked by plugin.", metadata=decision.metadata)
 
+        safe_args = sanitize_tool_arguments(tool, arguments)
         span = None
         started = time.perf_counter()
         if trace and tracer:
@@ -72,7 +74,7 @@ class ToolRegistry:
                 trace,
                 span_type="tool",
                 name=name,
-                input_preview={"arguments": arguments, "risk_level": tool.risk_level},
+                input_preview={"arguments": safe_args, "risk_level": tool.risk_level},
             )
             tracer.record_event(trace, event="tool_call_started", metadata={"tool_name": name})
         try:
@@ -104,11 +106,12 @@ class ToolRegistry:
                 },
             )
             if span:
+                safe_result = sanitize_tool_result(tool, result.content)
                 tracer.end_span(
                     trace,
                     span,
                     status="ok" if result.success else "error",
-                    output_preview={"content": result.content[:200], "error": result.error},
+                    output_preview=safe_result,
                     error=result.error,
                 )
         return result

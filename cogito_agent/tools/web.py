@@ -11,6 +11,12 @@ from cogito_agent.tools.base import Tool, ToolResult
 class WebFetchTool(Tool):
     name = "web_fetch"
     description = "Fetch a public HTTP/HTTPS URL and return a bounded text preview."
+    trace_policy = {
+        "sensitive_args": [],
+        "preview_args": ["url"],
+        "max_preview_chars": 200,
+        "store_hash": False,
+    }
     parameters = {
         "type": "object",
         "properties": {

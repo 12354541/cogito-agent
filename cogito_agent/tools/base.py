@@ -22,6 +22,12 @@ class Tool(ABC):
     risk_level: RiskLevel = "read-only"
     enabled: bool = True
     timeout_seconds: float = 30.0
+    trace_policy: dict[str, Any] = {
+        "sensitive_args": [],
+        "preview_args": [],
+        "max_preview_chars": 500,
+        "store_hash": False,
+    }
 
     def to_openai_tool(self) -> dict[str, Any]:
         return {

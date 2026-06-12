@@ -7,9 +7,11 @@ from cogito_agent.agent.state import Message
 from cogito_agent.llm.provider import LLMProvider
 from cogito_agent.llm.types import LLMToolCall
 from cogito_agent.memory.retriever import MemoryRetriever, RetrievalResult
+from cogito_agent.plugins.builtin.context_pressure import ContextPressurePlugin
 from cogito_agent.prompting.manager import PromptManager
 from cogito_agent.tools.registry import ToolRegistry
 from cogito_agent.tracing.context import TraceContext
+from cogito_agent.tracing.redaction import sanitize_tool_arguments
 
 if TYPE_CHECKING:
     from cogito_agent.tracing.tracer import Tracer
@@ -45,8 +47,11 @@ class RuleBasedReasoner:
         return ReasonerResult(content=answer, metadata={"steps": 1, "mode": "rule_based"})
 
 
+_TOOL_ERROR_RETRY_LIMIT = 2
+
+
 class LLMReasoner:
-    """LLM + tool-calling loop."""
+    """LLM + tool-calling loop with context pressure and error recovery."""
 
     def __init__(
         self,
@@ -56,12 +61,14 @@ class LLMReasoner:
         tool_registry: ToolRegistry,
         memory_retriever: MemoryRetriever | None = None,
         max_iterations: int = 8,
+        context_pressure: ContextPressurePlugin | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.prompt_manager = prompt_manager
         self.tool_registry = tool_registry
         self.memory_retriever = memory_retriever
         self.max_iterations = max_iterations
+        self.context_pressure = context_pressure or ContextPressurePlugin()
 
     async def run(
         self,
@@ -78,10 +85,23 @@ class LLMReasoner:
         messages: list[dict[str, Any]] = list(prompt.messages)
         visible_tools = self.tool_registry.openai_tools()
         tool_calls_summary: list[dict[str, Any]] = []
+        last_error: str | None = None
 
         for step in range(1, self.max_iterations + 1):
+            pressure = self.context_pressure.check_pressure(messages, trace=trace, tracer=tracer)
+            if pressure["action"] != "none":
+                tracer.record_event(trace, event="context_pressure_applied", metadata=pressure)
+
             tracer.record_event(trace, event="reasoner_step_started", metadata={"step": step})
-            llm_response = await self.llm_provider.chat(messages, tools=visible_tools, trace=trace)
+            try:
+                llm_response = await self.llm_provider.chat(messages, tools=visible_tools, trace=trace)
+            except Exception as exc:
+                error_msg = redact_text(str(exc))
+                tracer.record_event(trace, event="reasoner_error", metadata={"step": step, "error": error_msg})
+                last_error = error_msg
+                if step == self.max_iterations:
+                    break
+                continue
 
             if llm_response.tool_calls:
                 messages.append(
@@ -92,25 +112,56 @@ class LLMReasoner:
                     }
                 )
                 for call in llm_response.tool_calls:
-                    result = await self.tool_registry.execute(call.name, call.arguments, trace=trace, tracer=tracer)
-                    result_content = result.content if result.success else f"Tool error: {result.error}"
-                    tool_calls_summary.append(
-                        {
-                            "id": call.id,
-                            "name": call.name,
-                            "arguments": call.arguments,
-                            "success": result.success,
-                            "error": result.error,
-                        }
-                    )
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call.id,
-                            "name": call.name,
-                            "content": result_content,
-                        }
-                    )
+                    if not call.name or not call.arguments:
+                        error_msg = "Tool call missing name or arguments"
+                        tool_calls_summary.append({"id": call.id, "name": str(call.name), "arguments": {}, "success": False, "error": error_msg})
+                        messages.append({"role": "tool", "tool_call_id": call.id, "name": call.name, "content": f"Tool error: {error_msg}"})
+                        continue
+
+                    consecutive_failures = 0
+                    while consecutive_failures < _TOOL_ERROR_RETRY_LIMIT:
+                        result = await self.tool_registry.execute(call.name, call.arguments, trace=trace, tracer=tracer)
+                        tool_calls_summary.append(
+                            {
+                                "id": call.id,
+                                "name": call.name,
+                                "arguments": sanitize_tool_arguments(self.tool_registry.get(call.name) or _unknown_tool(), call.arguments),
+                                "success": result.success,
+                                "error": result.error,
+                            }
+                        )
+                        if result.success:
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call.id,
+                                    "name": call.name,
+                                    "content": result.content,
+                                }
+                            )
+                            break
+
+                        consecutive_failures += 1
+                        if consecutive_failures >= _TOOL_ERROR_RETRY_LIMIT:
+                            error_msg = result.error or "Tool call failed after retries"
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call.id,
+                                    "name": call.name,
+                                    "content": f"Tool error: {error_msg}",
+                                }
+                            )
+                            last_error = error_msg
+                        else:
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call.id,
+                                    "name": call.name,
+                                    "content": f"Tool retry: {result.error}",
+                                }
+                            )
                 continue
 
             content = llm_response.content or ""
@@ -125,6 +176,7 @@ class LLMReasoner:
                     "prompt_hash": prompt.prompt_hash,
                     "token_usage": llm_response.token_usage,
                     "used_doc_ids": [hit.doc_id for hit in retrieval.doc_hits],
+                    "last_error": last_error,
                 },
             )
 
@@ -135,6 +187,8 @@ class LLMReasoner:
             metadata={
                 "steps": self.max_iterations,
                 "status": "max_iterations_reached",
+                "last_error": last_error,
+                "tool_call_count": len(tool_calls_summary),
                 "used_doc_ids": [hit.doc_id for hit in retrieval.doc_hits],
             },
         )
@@ -148,3 +202,19 @@ def _tool_call_to_openai(call: LLMToolCall) -> dict[str, Any]:
         "type": "function",
         "function": {"name": call.name, "arguments": json.dumps(call.arguments, ensure_ascii=False)},
     }
+
+
+def redact_text(text: str) -> str:
+    from cogito_agent.tracing.redaction import redact_text as _rt
+    return _rt(text)
+
+
+def _unknown_tool():
+    from cogito_agent.tools.base import Tool
+    class _Unknown(Tool):
+        name = ""
+        description = ""
+        parameters = {"type": "object", "properties": {}, "additionalProperties": False}
+        async def execute(self, **kwargs):  # type: ignore[empty-body]
+            pass
+    return _Unknown()

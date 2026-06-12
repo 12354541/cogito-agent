@@ -45,6 +45,12 @@ class FileReadTool(WorkspaceFileToolMixin, Tool):
 class FileWriteTool(WorkspaceFileToolMixin, Tool):
     name = "write_file"
     description = "Write a UTF-8 text file inside the workspace."
+    trace_policy = {
+        "sensitive_args": ["content"],
+        "preview_args": ["path"],
+        "max_preview_chars": 200,
+        "store_hash": True,
+    }
     parameters = {
         "type": "object",
         "properties": {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from cogito_agent.memory.consolidation import MemoryConsolidator
+from cogito_agent.memory.extractor import ExtractedMemory, MemoryExtractor, _looks_temporal
 from cogito_agent.memory.markdown_store import MarkdownMemoryStore
 from cogito_agent.memory.retriever import MemoryRetriever
 from cogito_agent.memory.vector_store import InMemoryVectorStore
@@ -101,3 +102,73 @@ def test_retriever_uses_reranker_for_doc_hits(tmp_path):
 
     assert result.doc_hits[0].metadata["reranked"] is True
     assert "second.md" in result.doc_hits[0].source
+
+
+def test_extractor_skips_short_assistant(tmp_path):
+    store = MarkdownMemoryStore(tmp_path)
+    extractor = MemoryExtractor(store)
+    candidates = extractor.extract_from_conversation(
+        user_content="hi", assistant_content="ok", source_trace_id="t1", source_ref="r1"
+    )
+    assert candidates == []
+
+
+def test_extractor_extracts_user_fact(tmp_path):
+    store = MarkdownMemoryStore(tmp_path)
+    extractor = MemoryExtractor(store)
+    candidates = extractor.extract_from_conversation(
+        user_content="我是工程师，喜欢用 Python 开发。",
+        assistant_content="好的，我知道了。你是一名工程师。",
+        source_trace_id="t2",
+        source_ref="r2",
+    )
+    assert len(candidates) >= 1
+    entry = store.list_entries()
+    assert len(entry) >= 1
+    assert "工程师" in entry[0].content_preview
+
+
+def test_extractor_correction_forgets_old(tmp_path):
+    store = MarkdownMemoryStore(tmp_path)
+    old_id = store.add("likes coffee", source_trace_id="t_old", source_ref="r_old", confidence=0.6)
+
+    extractor = MemoryExtractor(store)
+    mem = extractor._store_or_update(
+        ExtractedMemory(content="does not like coffee", category="correction", confidence=0.75, is_correction=True),
+        source_trace_id="t3",
+        source_ref="r3",
+    )
+
+    entries = store.list_entries()
+    assert len(entries) == 1
+    assert entries[0].memory_id != old_id
+    assert "does not like coffee" in entries[0].content_preview
+
+
+def test_extractor_filters_sensitive_data(tmp_path):
+    store = MarkdownMemoryStore(tmp_path)
+    extractor = MemoryExtractor(store)
+    candidates = extractor.extract_from_conversation(
+        user_content="我的密码是 supersecret123",
+        assistant_content="已记录。",
+        source_trace_id="t4",
+        source_ref="r4",
+    )
+    assert all(not c.is_sensitive for c in candidates)
+    entries = store.list_entries()
+    assert len(entries) == 0
+
+
+def test_extractor_detects_conflicts(tmp_path):
+    store = MarkdownMemoryStore(tmp_path)
+    store.add("user likes Python", source_trace_id="t_a", source_ref="r_a", confidence=0.6)
+    store.add("user does not like Python", source_trace_id="t_b", source_ref="r_b", confidence=0.6)
+    extractor = MemoryExtractor(store)
+    conflicts = extractor.detect_conflicts()
+    assert len(conflicts) >= 1
+
+
+def test_looks_temporal():
+    assert _looks_temporal("现在几点了") is True
+    assert _looks_temporal("今天天气不错") is True
+    assert _looks_temporal("我喜欢编程") is False
